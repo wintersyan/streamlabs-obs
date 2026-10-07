@@ -1,5 +1,5 @@
 import { FormMonkey } from '../helpers/form-monkey';
-import { useSpectron, test } from '../helpers/spectron';
+import { useWebdriver, test } from '../helpers/webdriver';
 import {
   addSource,
   clickRemoveSource,
@@ -9,23 +9,25 @@ import {
   waitForSourceExist,
 } from '../helpers/modules/sources';
 import {
+  click,
   clickButton,
   focusChild,
   focusMain,
   select,
   waitForDisplayed,
 } from '../helpers/modules/core';
+import { platform } from 'os';
 
-useSpectron({ restartAppAfterEachTest: false });
+useWebdriver({ restartAppAfterEachTest: false });
 
 test('Create/Remove Color Source and view Source Properties', async t => {
   const sourceName = 'Color Source';
 
-  await addSource('Color Source', sourceName);
+  await addSource('Color Block', sourceName);
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Color');
@@ -34,7 +36,7 @@ test('Create/Remove Color Source and view Source Properties', async t => {
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -45,14 +47,14 @@ test('Create/Remove Image Source and view Source Properties', async t => {
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Image File');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -64,7 +66,7 @@ test('Create/Remove Browser Source and view Source Properties', async t => {
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
 
@@ -72,14 +74,14 @@ test('Create/Remove Browser Source and view Source Properties', async t => {
   await waitForDisplayed('label=Width');
   await waitForDisplayed('label=Height');
 
-  await (await (await select('[data-name=fps_custom')).$('[type=checkbox]')).click();
+  await click('span=Use custom frame rate');
 
   await waitForDisplayed('label=FPS');
   await waitForDisplayed('label=Custom CSS');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -87,11 +89,11 @@ test('Create/Remove Browser Source and view Source Properties', async t => {
 test('Create/Remove Media Source and view Source Properties', async t => {
   const sourceName = 'Media Source';
 
-  await addSource('Media Source', sourceName);
+  await addSource('Media File', sourceName);
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
 
@@ -99,7 +101,7 @@ test('Create/Remove Media Source and view Source Properties', async t => {
   await waitForDisplayed('label=Speed');
   await waitForDisplayed('label=YUV Color Range');
 
-  await (await (await select('[data-name=is_local_file')).$('[type=checkbox]')).click();
+  await click('span=Local File');
   await waitForDisplayed('label=Network Buffering');
   await waitForDisplayed('label=Input');
   await waitForDisplayed('label=Input Format');
@@ -107,7 +109,7 @@ test('Create/Remove Media Source and view Source Properties', async t => {
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -119,20 +121,20 @@ test('Create/Remove Image Slideshow and view Source Properties', async t => {
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Visibility Behavior');
   await waitForDisplayed('label=Slide Mode');
   await waitForDisplayed('label=Transition');
-  await waitForDisplayed('label=Time Between Slides (milliseconds)');
-  await waitForDisplayed('label=Transition Speed (milliseconds)');
+  await waitForDisplayed('label=Time Between Slides');
+  await waitForDisplayed('label=Transition Speed');
   await waitForDisplayed('label=Bounding Size/Aspect Ratio');
   await waitForDisplayed('label=Image Files');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -140,11 +142,16 @@ test('Create/Remove Image Slideshow and view Source Properties', async t => {
 test('Create/Remove Text Source and view Source Properties', async t => {
   const sourceName = 'Text Source';
 
-  await addSource('Text (GDI+)', sourceName);
+  if (platform() === 'win32') {
+    await addSource('Text (GDI+)', sourceName);
+  } else {
+    await addSource('Text (FreeType 2)', sourceName);
+  }
+
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
 
@@ -154,42 +161,43 @@ test('Create/Remove Text Source and view Source Properties', async t => {
   await waitForDisplayed('label=Font Size');
   await waitForDisplayed('label=Text');
 
-  await (await (await select('[data-name=read_from_file')).$('[type=checkbox]')).click();
+  if (platform() === 'win32') {
+    await (await (await select('[data-name=read_from_file')).$('[type=checkbox]')).click();
+    await waitForDisplayed('label=Text File (UTF-8)');
+    await waitForDisplayed('label=Text Transform');
+    await waitForDisplayed('label=Color');
+    await waitForDisplayed('label=Opacity');
 
-  await waitForDisplayed('label=Text File (UTF-8)');
-  await waitForDisplayed('label=Text Transform');
-  await waitForDisplayed('label=Color');
-  await waitForDisplayed('label=Opacity');
+    await (await (await select('[data-name=gradient')).$('[type=checkbox]')).click();
 
-  await (await (await select('[data-name=gradient')).$('[type=checkbox]')).click();
+    await waitForDisplayed('label=Gradient Color');
+    await waitForDisplayed('label=Gradient Opacity');
+    await waitForDisplayed('label=Gradient Direction');
 
-  await waitForDisplayed('label=Gradient Color');
-  await waitForDisplayed('label=Gradient Opacity');
-  await waitForDisplayed('label=Gradient Direction');
+    await waitForDisplayed('label=Background Color');
+    await waitForDisplayed('label=Background Opacity');
+    await waitForDisplayed('label=Alignment');
+    await waitForDisplayed('label=Vertical Alignment');
 
-  await waitForDisplayed('label=Background Color');
-  await waitForDisplayed('label=Background Opacity');
-  await waitForDisplayed('label=Alignment');
-  await waitForDisplayed('label=Vertical Alignment');
+    await (await (await select('[data-name=outline')).$('[type=checkbox]')).click();
 
-  await (await (await select('[data-name=outline')).$('[type=checkbox]')).click();
+    await waitForDisplayed('label=Outline Size');
+    await waitForDisplayed('label=Outline Color');
+    await waitForDisplayed('label=Outline Opacity');
 
-  await waitForDisplayed('label=Outline Size');
-  await waitForDisplayed('label=Outline Color');
-  await waitForDisplayed('label=Outline Opacity');
+    await (await (await select('[data-name=chatlog')).$('[type=checkbox]')).click();
 
-  await (await (await select('[data-name=chatlog')).$('[type=checkbox]')).click();
+    await waitForDisplayed('label=Chatlog Line Limit');
 
-  await waitForDisplayed('label=Chatlog Line Limit');
+    await (await (await select('[data-name=extents')).$('[type=checkbox]')).click();
 
-  await (await (await select('[data-name=extents')).$('[type=checkbox]')).click();
-
-  await waitForDisplayed('label=Width');
-  await waitForDisplayed('label=Height');
+    await waitForDisplayed('label=Width');
+    await waitForDisplayed('label=Height');
+  }
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -201,7 +209,7 @@ test('Create/Remove Display Capture and view Source Properties', async t => {
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   // this feature is in v1.3.0, uncomment once it is fully shipped
@@ -211,7 +219,7 @@ test('Create/Remove Display Capture and view Source Properties', async t => {
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -223,63 +231,72 @@ test('Create/Remove Window Capture and view Source Properties', async t => {
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
 
   await waitForDisplayed('label=Window');
-  await waitForDisplayed('label=Capture Method');
-  await waitForDisplayed('label=Window Match Priority');
+  if (platform() === 'win32') {
+    await waitForDisplayed('label=Capture Method');
+    await waitForDisplayed('label=Window Match Priority');
+  }
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
 
 test('Create/Remove Game Capture and view Source Properties', async t => {
+  if (platform() === 'darwin') {
+    t.pass('Game Capture is not supported on macOS');
+    return;
+  }
   const sourceName = 'Game Capture';
 
   await addSource('Game Capture', sourceName);
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Mode');
   await waitForDisplayed('label=Hook Rate');
 
-  await (await (await select('[data-name=user_placeholder_use')).$('[type=checkbox]')).click();
+  await waitForDisplayed('span=Сustomize placeholder');
+  await click('span=Сustomize placeholder');
   await waitForDisplayed('label=Placeholder Image');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
 
 test('Create/Remove Video Capture Device and view Source Properties', async t => {
-  const sourceName = 'Video Capture Device';
+  const sourceName = 'Video Capture';
 
-  await addSource('Video Capture Device', sourceName);
+  await addSource('Video Capture', sourceName);
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Device');
-  await waitForDisplayed('label=Resolution/FPS Type');
-  await waitForDisplayed('label=Resolution');
-  await waitForDisplayed('label=FPS');
-  await waitForDisplayed('label=Video Format');
-  await waitForDisplayed('label=Color Space');
-  await waitForDisplayed('label=Color Range');
-  await waitForDisplayed('label=Buffering');
-  await waitForDisplayed('label=Audio Output Mode');
+  if (platform() === 'win32') {
+    await waitForDisplayed('label=Resolution/FPS Type');
+    await waitForDisplayed('label=Resolution');
+    await waitForDisplayed('label=FPS');
+    await waitForDisplayed('label=Video Format');
+    await waitForDisplayed('label=Color Space');
+    await waitForDisplayed('label=Color Range');
+    await waitForDisplayed('label=Buffering');
+    await waitForDisplayed('label=Audio Output Mode');
+  }
 
   // this test fails on CI for some reason, investigating
   // await (await app.client.$('[data-name=use_custom_audio_device] input')).click();
@@ -287,7 +304,7 @@ test('Create/Remove Video Capture Device and view Source Properties', async t =>
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -299,14 +316,14 @@ test('Create/Remove Audio Input Capture and view Source Properties', async t => 
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Device');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -318,14 +335,14 @@ test('Create/Remove Audio Output Capture and view Source Properties', async t =>
   await focusMain();
 
   await selectSource(sourceName);
-  await clickSourceProperties();
+  await clickSourceProperties(sourceName);
 
   await focusChild();
   await waitForDisplayed('label=Device');
 
   await focusMain();
   await selectSource(sourceName);
-  await clickRemoveSource();
+  await clickRemoveSource(sourceName);
   await waitForSourceExist(sourceName, true);
   t.pass();
 });
@@ -334,7 +351,7 @@ test('Rename source', async t => {
   const sourceName = 'MyColorSource1';
   const newSourceName = 'MyColorSource2';
 
-  await addSource('Color Source', sourceName);
+  await addSource('Color Block', sourceName);
 
   await openRenameWindow(sourceName);
 

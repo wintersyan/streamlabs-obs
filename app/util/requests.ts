@@ -66,7 +66,7 @@ export async function downloadFile(
         const fileStream = fs.createWriteStream(dstPath);
         let bytesWritten = 0;
 
-        const readStream = ({ done, value }: { done: boolean; value: Uint8Array }) => {
+        const readStream = ({ done, value }: { done: boolean; value?: Uint8Array }) => {
           if (done) {
             fileStream.end((err: Error) => {
               if (err) {
@@ -143,7 +143,7 @@ export function jfetch<TResponse = unknown>(
       if (isJson || options.forceJson) {
         return response.json() as Promise<TResponse>;
       } else {
-        console.warn('jfetch: Got non-JSON response');
+        console.warn(`jfetch: Got non-JSON response ${response.status} from ${response.url}`);
         return (response.text() as unknown) as Promise<TResponse>;
       }
     } else if (isJson) {

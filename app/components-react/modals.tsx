@@ -1,13 +1,16 @@
+import React from 'react';
 import { Services } from './service-provider';
-import { Modal } from 'antd';
+import { Modal, Button, message } from 'antd';
 import Utils from '../services/utils';
 import { ModalFuncProps } from 'antd/lib/modal';
 import { $t } from '../services/i18n';
 import { TextInput } from './shared/inputs/TextInput';
 import Form, { useForm } from './shared/inputs/Form';
-import React, { useEffect } from 'react';
 import { Observable, Subject } from 'rxjs';
 import { FormProps } from 'antd/es';
+import { ModalLayout } from './shared/ModalLayout';
+import styles from './shared/Modals.m.less';
+import { useSubscription } from './hooks/useSubscription';
 
 /**
  * Show an Confirmation modal and return a Promise<confirmed: boolean>
@@ -44,7 +47,9 @@ export function confirmAsync(
  * alert('This is Alert').then(() => console.log('Alert closed'))
  *
  */
-export function alertAsync(p: Omit<ModalFuncProps, 'afterClose'> | string): Promise<void> {
+export function alertAsync(
+  p: (Omit<ModalFuncProps, 'afterClose'> | string) & { afterCloseFn?: () => void },
+): Promise<void> {
   const modalProps = typeof p === 'string' ? { title: p } : p;
   const { WindowsService } = Services;
   WindowsService.updateStyleBlockers(Utils.getWindowId(), true);
@@ -56,6 +61,11 @@ export function alertAsync(p: Omit<ModalFuncProps, 'afterClose'> | string): Prom
       ...modalProps,
       afterClose: () => {
         WindowsService.updateStyleBlockers(Utils.getWindowId(), false);
+
+        if (p?.afterCloseFn) {
+          p.afterCloseFn();
+        }
+
         resolve();
       },
     });
@@ -68,7 +78,7 @@ export function alertAsync(p: Omit<ModalFuncProps, 'afterClose'> | string): Prom
  *
  */
 export function promptAsync(
-  p: (ModalFuncProps & { placeholder: string }) | string,
+  p: (ModalFuncProps & { placeholder?: string }) | string,
   value: string = '',
 ): Promise<string> {
   const { WindowsService } = Services;
@@ -113,6 +123,86 @@ export function promptAsync(
   });
 }
 
+export function promptAction(p: {
+  title: string;
+  message: string;
+  btns?: { text: string; fn?: () => void }[];
+  btnText?: string;
+  btnType?: 'default' | 'primary';
+  cancelBtnPosition?: 'left' | 'right' | 'none';
+  cancelBtnText?: string;
+  fn?(): void | ((props: any) => unknown | void);
+  cancelFn?(): void | ((props?: any) => unknown | void);
+  icon?: React.ReactNode;
+  secondaryActionText?: string;
+  secondaryActionFn?: () => unknown;
+  maskClosable?: boolean;
+}) {
+  return alertAsync({
+    bodyStyle: { padding: '24px' },
+    className: styles.actionModal,
+    type: 'confirm',
+    title: p.title,
+    content: p.message,
+    icon: p.icon ? <span className={styles.actionModalIcon}>{p.icon}</span> : undefined,
+    closable: true,
+    maskClosable: p.maskClosable ?? true,
+    cancelButtonProps: { style: { display: 'none' } },
+    okButtonProps: { style: { display: 'none' } },
+    modalRender: node => (
+      <ModalLayout
+        footer={
+          <Form layout={'inline'} className={styles.actionModalFooter}>
+            {!p.cancelBtnPosition ||
+              (p.cancelBtnPosition && p.cancelBtnPosition === 'left' && (
+                <Button onClick={() => submit(p?.cancelFn)}>{p.cancelBtnText ?? $t('Skip')}</Button>
+              ))}
+            {p.secondaryActionFn && p.secondaryActionText && (
+              <Button onClick={() => submit(p?.secondaryActionFn)}>{p.secondaryActionText}</Button>
+            )}
+            <Button type={p?.btnType ?? 'primary'} onClick={() => submit(p?.fn)}>
+              {p.btnText}
+            </Button>
+            {p.cancelBtnPosition && p.cancelBtnPosition === 'right' && (
+              <Button onClick={() => submit(p?.cancelFn)}>{p.cancelBtnText ?? $t('Skip')}</Button>
+            )}
+          </Form>
+        }
+      >
+        {node}
+      </ModalLayout>
+    ),
+    width: 600,
+  });
+}
+
+export function alertInfo({
+  name,
+  text,
+  duration,
+}: {
+  name: string;
+  text: string;
+  duration?: number;
+}) {
+  message.info({
+    key: name,
+    content: <AlertContent name={name} message={text} />,
+    className: styles.infoAlert,
+    onClick: () => message.destroy(name),
+    duration,
+  });
+}
+
+export function AlertContent(p: { name: string; message: string }) {
+  return (
+    <div className={styles.alertContent} data-name={p.name}>
+      <div>{p.message}</div>
+      <i className="icon-close" />
+    </div>
+  );
+}
+
 export function DefaultPromptForm(
   p: {
     values: { prompt: string };
@@ -121,11 +211,8 @@ export function DefaultPromptForm(
 ) {
   const form = useForm();
 
-  useEffect(() => {
-    const subscription = p.submitEmitter.subscribe(() => {
-      onFinish();
-    });
-    return () => subscription.unsubscribe();
+  useSubscription(p.submitEmitter, () => {
+    onFinish();
   });
 
   function onChange(newVal: string) {
@@ -142,7 +229,7 @@ export function DefaultPromptForm(
 
   return (
     <Form name="prompt" form={form}>
-      <TextInput name="prompt" value={p.values.prompt} onChange={onChange} />
+      <TextInput name="prompt" value={p.values.prompt} onChange={onChange} nowrap />
     </Form>
   );
 }
@@ -156,4 +243,11 @@ function fixBodyWidth() {
   setTimeout(() => {
     document.querySelector('body')!.setAttribute('style', '');
   });
+}
+
+function submit(fn?: void | ((props?: any) => unknown) | undefined) {
+  Modal.destroyAll();
+  if (fn) {
+    fn();
+  }
 }

@@ -1,52 +1,104 @@
-import React, { useEffect, useState } from 'react';
-import { TPlatform } from '../../../services/platforms';
-import { ListInput, TSlobsInputProps } from '../../shared/inputs';
+import React, { useEffect, useRef } from 'react';
+import {
+  getPlatformService,
+  IGame,
+  IPlatformCapabilityGame,
+  TPlatform,
+} from '../../../services/platforms';
+import { ListInput, TInputLayout, TSlobsInputProps } from '../../shared/inputs';
 import { $t } from '../../../services/i18n';
-import { useOnCreate, useFormState } from '../../hooks';
-import { Services } from '../../service-provider';
 import { IListOption } from '../../shared/inputs/ListInput';
+import { Services } from '../../service-provider';
+import { injectState, useModule } from 'slap';
+import { CaretDownOutlined, CaretUpOutlined } from '@ant-design/icons';
 
-type TProps = TSlobsInputProps<{ platform: TPlatform }, string>;
+type TProps = TSlobsInputProps<
+  {
+    platform: TPlatform;
+    layout?: TInputLayout;
+    description?: string | React.ReactNode;
+  },
+  string
+>;
 
 export default function GameSelector(p: TProps) {
   const { platform } = p;
-  const { TwitchService, FacebookService } = Services;
-  const selectedGame: string =
-    (platform === 'twitch'
-      ? TwitchService.state.settings.game
-      : FacebookService.state.settings.game) || '';
+  const platformService = (getPlatformService(platform) as unknown) as IPlatformCapabilityGame;
+  let selectedGameId = platformService.state.settings.game;
+  let selectedGameName = selectedGameId;
 
-  const { s, updateState } = useFormState(() => {
+  const isTwitch = platform === 'twitch';
+  const isTikTok = platform === 'tiktok';
+  const isKick = platform === 'kick';
+
+  switch (platform) {
+    case 'twitch':
+      selectedGameName = Services.TwitchService.state.settings.game;
+      selectedGameId = Services.TwitchService.state.settings.gameId;
+      break;
+    case 'tiktok':
+      selectedGameName = Services.TikTokService.state.gameName;
+      break;
+    case 'kick':
+      selectedGameName = Services.KickService.state.gameName;
+      break;
+  }
+
+  const { isSearching, setIsSearching, games, setGames } = useModule(() => {
+    const selectedGameOptions =
+      isTikTok && selectedGameId.toLowerCase() !== Services.TikTokService.defaultGame.id
+        ? [
+            { label: selectedGameName, value: selectedGameId },
+            {
+              label: Services.TikTokService.defaultGame.name,
+              value: Services.TikTokService.defaultGame.id,
+            },
+          ]
+        : [{ label: selectedGameName, value: selectedGameId }];
+
     return {
-      games: selectedGame
-        ? [{ label: selectedGame, value: selectedGame }]
-        : ([] as IListOption<string>[]),
+      state: injectState({
+        isSearching: false,
+        games: selectedGameId ? selectedGameOptions : ([] as IListOption<string>[]),
+      }),
     };
   });
 
-  const [isSearching, setIsSearching] = useState(false);
+  const hasSearched = useRef(false);
+
+  function fetchGames(query: string): Promise<IGame[]> {
+    return platformService.searchGames(query);
+  }
 
   useEffect(() => {
     loadImageForSelectedGame();
   }, []);
 
   async function loadImageForSelectedGame() {
-    if (platform !== 'twitch') return;
-    if (!selectedGame) return;
-    const game = await TwitchService.actions.return.fetchGame(selectedGame);
-    if (!game || game.name !== selectedGame) return;
-    updateState({
-      games: s.games.map(opt => (opt.value === selectedGame ? { ...opt, image: game.image } : opt)),
-    });
+    // game images available for Twitch and Kick only
+    if (!['twitch', 'kick'].includes(platform)) return;
+    if (!selectedGameName) return;
+    // Twitch api can return multiple games with the same name, so we have to find the one with the matching id
+    const game = await platformService.fetchGame(isTwitch ? selectedGameId : selectedGameName);
+    if (!game || game.name !== selectedGameName) return;
+    // Don't overwrite search results if the user has already searched
+    if (hasSearched.current) return;
+    setGames(
+      games.map(opt => (opt.value === selectedGameId ? { ...opt, image: game.image } : opt)),
+    );
   }
 
   async function onSearch(searchString: string) {
-    if (searchString.length < 2) return;
-    const games = (platform === 'twitch'
-      ? await TwitchService.actions.return.searchGames(searchString)
-      : await FacebookService.actions.return.searchGames(searchString)
-    ).map(g => ({ value: g.name, label: g.name, image: g.image }));
-    updateState({ games });
+    if (searchString.length < 2 && platform !== 'tiktok') return;
+    hasSearched.current = true;
+    const games =
+      (await fetchGames(searchString))?.map(g => ({
+        value: ['tiktok', 'kick', 'twitch'].includes(platform) ? g.id : g.name,
+        label: g.name,
+        image: g?.image,
+      })) ?? [];
+
+    setGames(games);
     setIsSearching(false);
   }
 
@@ -55,27 +107,81 @@ export default function GameSelector(p: TProps) {
     setIsSearching(true);
   }
 
-  const isTwitch = platform === 'twitch';
+  function onSelect(searchString: string) {
+    const game = games.find(game => game.label === searchString);
+
+    if (isTikTok) {
+      Services.TikTokService.actions.setGameName(searchString);
+    }
+
+    if (isTwitch) {
+      // Because Twitch's API requires the game id but highlighter requires the name, we have
+      // to track both to update the Twitch API separately
+      Services.TwitchService.actions.setGameInfo({
+        gameId: game?.value ?? '',
+        gameName: game?.label ?? '',
+      });
+    }
+
+    if (isKick) {
+      // Kick's API requires the category id, but this component renders the name,
+      // so the service has to track both
+      Services.KickService.actions.setGameInfo({
+        gameId: game?.value ?? '',
+        gameName: game?.label ?? '',
+      });
+    }
+
+    if (!game) return;
+    setGames([game]);
+  }
+
+  const label = {
+    twitch: $t('Twitch Category'),
+    facebook: $t('Facebook Game'),
+    tiktok: $t('TikTok Category'),
+    kick: $t('Kick Category'),
+  }[platform as string];
+
+  const filterOption = (input: string, option?: { label: string; value: string }) => {
+    if (isTikTok) {
+      return (
+        option?.label === 'Other' ||
+        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+      );
+    }
+
+    return (option?.label ?? '').toLowerCase().includes(input.toLowerCase());
+  };
 
   return (
     <ListInput
-      label={platform === 'twitch' ? $t('Twitch Game') : $t('Facebook Game')}
+      label={label}
       name={`${p.platform}Game`}
-      value={selectedGame}
+      value={selectedGameId}
       extra={p.extra}
       onChange={p.onChange}
       placeholder={$t('Start typing to search')}
-      options={s.games}
+      options={games}
       showSearch
       onSearch={onSearch}
+      onSelect={(val, opts) => {
+        onSelect(typeof opts.label === 'string' ? opts.label : '');
+      }}
+      filterOption={filterOption}
       debounce={500}
-      required={isTwitch}
-      hasImage={isTwitch}
+      required={isTwitch || isKick}
+      hasImage={isTwitch || isKick}
       onBeforeSearch={onBeforeSearchHandler}
-      imageSize={TwitchService.gameImageSize}
+      imageSize={platformService.gameImageSize}
       loading={isSearching}
       notFoundContent={isSearching ? $t('Searching...') : $t('No matching game(s) found.')}
       allowClear
+      layout={p.layout}
+      size="large"
+      style={p.style}
+      suffixIcon={isSearching ? <CaretUpOutlined /> : <CaretDownOutlined />}
+      description={p.description}
     />
   );
 }

@@ -1,4 +1,5 @@
 /*global SLOBS_BUNDLE_ID*/
+/*global SLD_SENTRY_BACKEND_SERVER_URL, SLD_SENTRY_FRONTEND_DSN, SLD_SENTRY_BACKEND_SERVER_PREVIEW_URL*/
 
 import { I18nService, $t } from 'services/i18n';
 
@@ -29,26 +30,30 @@ import { getResource } from 'services';
 import * as obs from '../obs-api';
 import path from 'path';
 import util from 'util';
-import uuid from 'uuid/v4';
-import Blank from 'components/windows/Blank.vue';
-import Main from 'components/windows/Main.vue';
-import { Loader } from 'components/shared/ReactComponentList';
+import { Loader, Blank } from 'components/shared/ReactComponentList';
+import Main from 'components/windows/Main';
 import process from 'process';
 import { MetricsService } from 'services/metrics';
 import { UsageStatisticsService } from 'services/usage-statistics';
+import * as remote from '@electron/remote';
+import { RealmService } from 'app-services';
+import { DiagnosticsService } from 'services/diagnostics';
 
-const { ipcRenderer, remote, app, contentTracing } = electron;
+// // TODO: commented until we remove slap library
+// // For React Windows
+// import React from 'react';
+// import ReactDOM from 'react-dom';
+// import Main from 'components-react/windows/Main';
+
+const { ipcRenderer } = electron;
 const slobsVersion = Utils.env.SLOBS_VERSION;
 const isProduction = Utils.env.NODE_ENV === 'production';
 const isPreview = !!Utils.env.SLOBS_PREVIEW;
 
-// This is the development DSN
-let sentryDsn = 'https://8f444a81edd446b69ce75421d5e91d4d@sentry.io/252950';
+const logTypes = ['debug', 'error', 'info', 'log'] as const;
+type TLogType = typeof logTypes[number];
 
 if (isProduction) {
-  // This is the production DSN
-  sentryDsn = 'https://6971fa187bb64f58ab29ac514aa0eb3d@sentry.io/251674';
-
   electron.crashReporter.addExtraParameter('windowId', Utils.getWindowId());
 }
 
@@ -66,7 +71,7 @@ for (let i = 0; i < styleSheets.length; i++) {
   }
 }
 
-function wrapLogFn(fn: string) {
+function wrapLogFn(fn: TLogType) {
   const old: Function = console[fn];
   console[fn] = (...args: any[]) => {
     old.apply(console, args);
@@ -89,7 +94,7 @@ function sendLogMsg(level: string, ...args: any[]) {
   ipcRenderer.send('logmsg', { level, sender: windowId, message: serialized });
 }
 
-['log', 'info', 'warn', 'error'].forEach(wrapLogFn);
+logTypes.forEach(wrapLogFn);
 
 if (windowId === 'worker') {
   console.log(`Bundle Id: ${SLOBS_BUNDLE_ID}`);
@@ -105,9 +110,18 @@ window.addEventListener('unhandledrejection', e => {
 
 // Remove the startup event listener that catches bundle parse errors and other
 // critical issues starting up the renderer.
-if (window['_startupErrorHandler']) {
-  window.removeEventListener('error', window['_startupErrorHandler']);
-  delete window['_startupErrorHandler'];
+declare global {
+  interface Window {
+    _startupErrorHandler: EventListenerOrEventListenerObject | undefined;
+  }
+}
+
+// TODO: can't find `_startupErrorHandler` in electron or chromium sources
+// This might no longer be relevant, we should breakpoint below and see if
+// it exists.
+if (window._startupErrorHandler) {
+  window.removeEventListener('error', window._startupErrorHandler);
+  delete window._startupErrorHandler;
 }
 
 // Used by Eddy for debugging on mac.
@@ -131,7 +145,7 @@ if (isProduction || process.env.SLOBS_REPORT_TO_SENTRY) {
   const bundleNames = electron.ipcRenderer.sendSync('getBundleNames', bundles);
 
   Sentry.init({
-    dsn: sentryDsn,
+    dsn: SLD_SENTRY_FRONTEND_DSN,
     release: `${slobsVersion}-${SLOBS_BUNDLE_ID}`,
     beforeSend: (event, hint) => {
       // Because our URLs are local files and not publicly
@@ -205,33 +219,12 @@ Vue.use(Toasted);
 Vue.use(VeeValidate); // form validations
 Vue.use(VModal);
 
-Vue.directive('trackClick', {
-  bind(el: HTMLElement, binding: { value?: { component: string; target: string } }) {
-    if (typeof binding.value.component !== 'string') {
-      throw new Error(
-        `vTrackClick requires "component" to be passed. Got: ${binding.value.component}`,
-      );
-    }
-
-    if (typeof binding.value.target !== 'string') {
-      throw new Error(`vTrackClick requires "target" to be passed. Got: ${binding.value.target}`);
-    }
-
-    el.addEventListener('click', () => {
-      getResource<UsageStatisticsService>('UsageStatisticsService').actions.recordClick(
-        binding.value.component,
-        binding.value.target,
-      );
-    });
-  },
-});
-
 // Disable chrome default drag/drop behavior
 document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('dragenter', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
 
-const ctxMenu = electron.remote.Menu.buildFromTemplate([
+const ctxMenu = remote.Menu.buildFromTemplate([
   { role: 'copy', accelerator: 'CommandOrControl+C' },
   { role: 'paste', accelerator: 'CommandOrControl+V' },
 ]);
@@ -255,10 +248,12 @@ export const apiInitErrorResultToMessage = (resultCode: obs.EVideoCodes) => {
 };
 
 const showDialog = (message: string): void => {
-  electron.remote.dialog.showErrorBox('Initialization Error', message);
+  remote.dialog.showErrorBox('Initialization Error', message);
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await RealmService.instance.connect();
+
   const store = createStore();
 
   // setup VueI18n plugin
@@ -276,7 +271,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   I18nService.setVuei18nInstance(i18n);
 
-  if (!Utils.isOneOffWindow()) {
+  // We don't register main/child windows in dev mode to allow refreshing
+  if (!Utils.isOneOffWindow() && !Utils.isDevMode()) {
     ipcRenderer.send('register-in-crash-handler', { pid: process.pid, critical: false });
   }
 
@@ -289,13 +285,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const obsUserPluginsService: ObsUserPluginsService = ObsUserPluginsService.instance;
 
     // This is used for debugging
-    window['obs'] = obs;
+    (window as typeof window & { obs: typeof obs }).obs = obs;
 
     // Host a new OBS server instance
-    obs.IPC.host(electron.remote.process.env.IPC_UUID);
+    obs.IPC.host(remote.process.env.IPC_UUID);
     obs.NodeObs.SetWorkingDirectory(
       path.join(
-        electron.remote.app.getAppPath().replace('app.asar', 'app.asar.unpacked'),
+        remote.app.getAppPath().replace('app.asar', 'app.asar.unpacked'),
         'node_modules',
         'obs-studio-node',
       ),
@@ -307,7 +303,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const apiResult = obs.NodeObs.OBS_API_initAPI(
       'en-US',
       appService.appDataDirectory,
-      electron.remote.process.env.SLOBS_VERSION,
+      remote.process.env.SLOBS_VERSION,
+      isPreview ? SLD_SENTRY_BACKEND_SERVER_PREVIEW_URL : SLD_SENTRY_BACKEND_SERVER_URL,
     );
 
     if (apiResult !== obs.EVideoCodes.Success) {
@@ -335,8 +332,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // create a root Vue component
   const windowId = Utils.getCurrentUrlParams().windowId;
+
+  // // TODO: commented until we remove slap library
+  // if (windowId !== 'main') {
+  // create a root Vue component
   const vm = new Vue({
     i18n,
     store,
@@ -360,6 +360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     render(h) {
       if (this.isRefreshing) return h(Blank);
       if (windowId === 'worker') return h(Blank);
+      if (windowId === 'main') return h(Main);
       if (windowId === 'child') {
         if (store.state.bulkLoadFinished && store.state.i18nReady) {
           return h(ChildWindow);
@@ -367,14 +368,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         return h(Loader);
       }
-      if (windowId === 'main') return h(Main);
       return h(OneOffWindow);
     },
   });
 
+  // allow to refresh the window by pressing `F5` in the DevMode
+  if (Utils.isDevMode()) {
+    window.addEventListener('keyup', ev => {
+      if (ev.key === 'F5') vm.startWindowRefresh();
+    });
+  }
+  // // TODO: commented until we remove slap library
+  // } else {
+  //   // create a roote React component
+  //   ReactDOM.render(React.createElement(Main), document.getElementById('app'));
+  // }
+
   let mainWindowShowTime = 0;
   if (Utils.isMainWindow()) {
-    electron.remote.getCurrentWindow().show();
+    remote.getCurrentWindow().show();
     mainWindowShowTime = Date.now();
   }
 
@@ -398,13 +410,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (ctx) setSentryContext(ctx);
       userService.sentryContext.subscribe(setSentryContext);
     }
-
-    // allow to refresh the window by pressing `F5` in the DevMode
-    if (Utils.isDevMode()) {
-      window.addEventListener('keyup', ev => {
-        if (ev.key === 'F5') vm.startWindowRefresh();
-      });
-    }
   });
 });
 
@@ -412,5 +417,80 @@ if (Utils.isDevMode()) {
   window.addEventListener('error', () => ipcRenderer.send('showErrorAlert'));
   window.addEventListener('keyup', ev => {
     if (ev.key === 'F12') electron.ipcRenderer.send('openDevTools');
+  });
+}
+
+// Ctrl+Shift+Alt+D uploads a diagnostic report from the main window only.
+// Kept outside HotkeysService so it stays window-focused (HotkeysService uses node-libuiohook,
+// which is OS-global and would fire during gaming/streaming).
+// Note: While the user hypothetically could add this hotkey combination as a custom hotkey, it is
+// specific enough that this is unlikely and the benefit of having it work even when the app isn't
+// focused outweighs the risk of conflicts.
+if (Utils.isMainWindow()) {
+  let uploadingDiag = false;
+
+  window.addEventListener('keyup', ev => {
+    const isChord = ev.code === 'KeyD' && ev.shiftKey && ev.altKey && (ev.ctrlKey || ev.metaKey);
+    if (!isChord) return;
+
+    const target = ev.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    ) {
+      return;
+    }
+
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    if (uploadingDiag) return;
+    uploadingDiag = true;
+
+    const diagnosticsService = getResource<DiagnosticsService>('DiagnosticsService');
+
+    diagnosticsService.actions.return
+      .uploadReport()
+      .then(r => {
+        remote.clipboard.writeText(r.report_code);
+        remote.dialog
+          .showMessageBox(remote.getCurrentWindow(), {
+            type: 'info',
+            title: $t('Diagnostic Report Uploaded Successfully'),
+            message: $t('Diagnostic Report Uploaded Successfully'),
+            detail:
+              $t(
+                'The diagnostic report was securely uploaded, and the Report ID below has been copied to your clipboard. Please provide the Report ID to the Streamlabs Streamer Success Team.',
+              ) +
+              '\n\n' +
+              r.report_code,
+            buttons: [$t('Copy Report ID'), $t('OK')],
+            noLink: true,
+          })
+          .then(({ response }) => {
+            if (response === 0) {
+              // Copy the report code to clipboard
+              remote.clipboard.writeText(r.report_code);
+            }
+            return;
+          });
+      })
+
+      .catch(e => {
+        console.error('Error generating diagnostic report', e);
+        remote.dialog.showMessageBox(remote.getCurrentWindow(), {
+          type: 'error',
+          title: $t('Error Uploading Diagnostic Report'),
+          message: $t('Error Uploading Diagnostic Report'),
+          detail: $t(
+            'There was an error uploading the diagnostic report. Please try again, and let the Streamlabs Streamer Success team know if the issue persists.',
+          ),
+          buttons: [$t('OK')],
+          noLink: true,
+        });
+      })
+      .finally(() => {
+        uploadingDiag = false;
+      });
   });
 }

@@ -7,6 +7,7 @@ import { useSourceShowcaseSettings } from './useSourceShowcase';
 import styles from './SourceShowcase.m.less';
 import { useVuex } from 'components-react/hooks';
 import { Services } from '../../service-provider';
+import Badge from 'components-react/shared/DismissableBadge';
 
 export default function SourceTag(p: {
   name?: string;
@@ -14,18 +15,24 @@ export default function SourceTag(p: {
   appId?: string;
   appSourceId?: string;
   essential?: boolean;
+  excludeWrap?: boolean;
+  hideShortDescription?: boolean;
 }) {
-  const {
-    inspectSource,
-    selectInspectedSource,
-    inspectedSource,
-    inspectedAppId,
-    inspectedAppSourceId,
-  } = useSourceShowcaseSettings();
+  const { inspectSource, selectInspectedSource, store } = useSourceShowcaseSettings();
+
+  const { inspectedSource, inspectedAppId, inspectedAppSourceId } = store.useState(s => {
+    return {
+      inspectedSource: s.inspectedSource,
+      inspectedAppId: s.inspectedAppId,
+      inspectedAppSourceId: s.inspectedAppSourceId,
+    };
+  });
   const { UserService } = Services;
   const { platform } = useVuex(() => ({ platform: UserService.views.platform?.type }));
 
   const displayData =
+    // TODO: index
+    // @ts-ignore
     WidgetDisplayData(platform)[WidgetType[p.type]] || SourceDisplayData()[p.type];
 
   function active() {
@@ -36,17 +43,35 @@ export default function SourceTag(p: {
   return (
     <Col span={8}>
       <div
-        className={cx(styles.sourceTag, {
+        className={cx('source-tag', styles.sourceTag, {
           [styles.active]: active(),
           [styles.essential]: p.essential,
+          [styles.excludeWrap]: p.excludeWrap,
         })}
         onClick={() => inspectSource(p.type, p.appId, p.appSourceId)}
         onDoubleClick={() => selectInspectedSource()}
         data-name={displayData?.name || p.name}
       >
-        <i className={displayData?.icon} />
-        {displayData?.name || p.name}
-        {p.essential && <div style={{ opacity: '0.5' }}>{displayData?.shortDesc}</div>}
+        {displayData?.badge && (
+          <span className={styles.badgeContainer}>
+            <Badge content={displayData.badge} />
+          </span>
+        )}
+        <div className={styles.nameRow}>
+          <div className={styles.iconWrapper}>
+            {displayData?.icon && <i className={displayData?.icon} />}
+          </div>
+          <div className={styles.displayName}>{displayData?.name || p.name}</div>
+        </div>
+        {displayData?.shortDesc && !p.hideShortDescription && (
+          <div
+            style={{
+              opacity: '0.5',
+            }}
+          >
+            {displayData?.shortDesc}
+          </div>
+        )}
       </div>
     </Col>
   );

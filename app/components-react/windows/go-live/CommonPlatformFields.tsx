@@ -1,12 +1,11 @@
 import { TPlatform } from '../../../services/platforms';
 import { $t } from '../../../services/i18n';
-import React from 'react';
-import { CheckboxInput, InputComponent, TextAreaInput, TextInput } from '../../shared/inputs';
-import { assertIsDefined } from '../../../util/properties-type-guards';
-import InputWrapper from '../../shared/inputs/InputWrapper';
-import Animate from 'rc-animate';
+import React, { useMemo } from 'react';
+import { InputComponent, TextAreaInput, TextInput, TInputLayout } from '../../shared/inputs';
 import { TLayoutMode } from './platforms/PlatformSettingsLayout';
 import { Services } from '../../service-provider';
+import { Tooltip } from 'antd';
+import AnimatedWrapper from 'components-react/shared/AnimatedWrapper';
 
 interface ICommonPlatformSettings {
   title: string;
@@ -22,6 +21,8 @@ interface IProps {
   layoutMode?: TLayoutMode;
   value: ICommonPlatformSettings;
   descriptionIsRequired?: boolean;
+  enabledPlatforms?: TPlatform[];
+  layout?: TInputLayout;
   onChange: (newValue: ICommonPlatformSettings) => unknown;
 }
 
@@ -41,22 +42,15 @@ export const CommonPlatformFields = InputComponent((rawProps: IProps) => {
     p.onChange({ ...platformSettings, ...patch });
   }
 
-  /**
-   * Toggle the "Use different title and description " checkbox
-   **/
-  function toggleUseCustom() {
-    assertIsDefined(p.platform);
-    const isEnabled = p.value.useCustomFields;
-    updatePlatform({ useCustomFields: !isEnabled });
-  }
-
   function updateCommonField(fieldName: TCustomFieldName, value: string) {
     updatePlatform({ [fieldName]: value });
   }
 
   const view = Services.StreamingService.views;
-  const hasCustomCheckbox = p.layoutMode === 'multiplatformAdvanced';
-  const fieldsAreVisible = !hasCustomCheckbox || p.value.useCustomFields;
+  const fieldsAreVisible = useMemo(() => {
+    if (p.layoutMode === 'singlePlatform') return true;
+    return !p.platform || p.value.useCustomFields || false;
+  }, [p.layoutMode, p.platform, p.value.useCustomFields]);
   const descriptionIsRequired =
     typeof p.descriptionIsRequired === 'boolean'
       ? p.descriptionIsRequired
@@ -66,53 +60,99 @@ export const CommonPlatformFields = InputComponent((rawProps: IProps) => {
     ? view.supports('description', [p.platform as TPlatform])
     : view.supports('description');
 
+  // Only the shared instance can run out of platforms to write to, and only while live, where
+  // `updateCommonFields` skips any platform using its own title. Once every enabled platform has
+  // opted out, editing the shared title changes nothing.
+  const titleDisabled =
+    !p.platform &&
+    view.isMidStreamMode &&
+    view.enabledPlatforms.length > 0 &&
+    !view.platformsWithoutCustomFields.length;
+
   const fields = p.value;
 
-  // find out the best title for common fields
-  const title = hasDescription
-    ? $t('Use different title and description')
-    : $t('Use different title');
+  const height = useMemo(() => {
+    if (!fieldsAreVisible) {
+      return '0px';
+    }
+
+    if (hasDescription) {
+      return '162px';
+    }
+
+    return '71px';
+  }, [fieldsAreVisible, hasDescription]);
+
+  // determine max character length for title by enabled platform limitation
+  let maxCharacters = 120;
+  const enabledPlatforms = view.enabledPlatforms;
+  if (enabledPlatforms.includes('youtube')) {
+    maxCharacters = 100;
+  } else if (enabledPlatforms.includes('twitch')) {
+    maxCharacters = 140;
+  }
+
+  // Patreon requires both a title and description of at least 3 characters,
+  // but other platforms do not have a minimum character requirement for title or description
+  const hasPatreon = p.platform === 'patreon' || enabledPlatforms.includes('patreon');
+  const minCharacters = hasPatreon ? 3 : undefined;
+
+  const titleTooltip = useMemo(() => {
+    if (hasPatreon) {
+      return $t('Patreon requires a title of at least 3 characters');
+    }
+
+    if (enabledPlatforms.includes('tiktok')) {
+      return $t('Only 32 characters of your title will display on TikTok');
+    }
+
+    return undefined;
+  }, [enabledPlatforms]);
 
   return (
-    <div>
-      {/* USE CUSTOM CHECKBOX */}
-      {hasCustomCheckbox && (
-        <InputWrapper>
-          <CheckboxInput
-            name="customEnabled"
-            value={p.value.useCustomFields}
-            onChange={toggleUseCustom}
-            label={title}
-          />
-        </InputWrapper>
+    <AnimatedWrapper
+      visible={fieldsAreVisible}
+      style={{ marginBottom: p.platform && fieldsAreVisible ? '10px' : '0px' }}
+      height={height}
+    >
+      {/*TITLE*/}
+      <TextInput
+        value={fields['title']}
+        name="title"
+        onChange={val => updateCommonField('title', val)}
+        label={
+          titleTooltip ? (
+            <Tooltip title={titleTooltip} placement="right">
+              {$t('Title')}
+              <i className="icon-information" style={{ marginLeft: '5px' }} />
+            </Tooltip>
+          ) : (
+            $t('Title')
+          )
+        }
+        // A disabled input cannot be corrected, so it must not be able to fail validation. Each
+        // platform using its own title validates that title in its own section.
+        required={!titleDisabled}
+        disabled={titleDisabled}
+        max={maxCharacters}
+        min={minCharacters}
+        layout={p.layout}
+        style={{ marginTop: !p.platform ? '0px' : '10px' }}
+        size="large"
+      />
+
+      {/*DESCRIPTION*/}
+      {hasDescription && (
+        <TextAreaInput
+          value={fields['description']}
+          onChange={val => updateCommonField('description', val)}
+          name="description"
+          label={$t('Description')}
+          required={descriptionIsRequired}
+          min={minCharacters}
+          layout={p.layout}
+        />
       )}
-
-      <Animate transitionName="slidedown">
-        {fieldsAreVisible && (
-          <div>
-            {/*TITLE*/}
-            <TextInput
-              value={fields['title']}
-              name="title"
-              onChange={val => updateCommonField('title', val)}
-              label={$t('Title')}
-              required={true}
-              max={p.platform === 'twitch' ? 140 : 120}
-            />
-
-            {/*DESCRIPTION*/}
-            {hasDescription && (
-              <TextAreaInput
-                value={fields['description']}
-                onChange={val => updateCommonField('description', val)}
-                name="description"
-                label={$t('Description')}
-                required={descriptionIsRequired}
-              />
-            )}
-          </div>
-        )}
-      </Animate>
-    </div>
+    </AnimatedWrapper>
   );
 });

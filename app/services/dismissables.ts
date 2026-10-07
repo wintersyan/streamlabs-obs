@@ -9,6 +9,17 @@ export enum EDismissable {
   RecentEventsHelpTip = 'recent_events_help_tip',
   FacebookNeedPermissionsTip = 'facebook_need_permissions_tip',
   HighlighterNotification = 'highlighter_notification',
+  GuestCamFirstTimeModal = 'guest_cam_first_time',
+  SourceSelectorFolders = 'source_selector_folders',
+  CollabCamRollout = 'collab_cam_rollout',
+  CustomMenuSettings = 'custom_menu_settings',
+  LoginPrompt = 'login_prompt',
+  TikTokRejected = 'tiktok_rejected',
+  TikTokEligible = 'tiktok_eligible',
+  TikTokReapply = 'tiktok_reapply',
+  EnhancedBroadcasting = 'enhanced_broadcasting',
+  StreamAvatarAutomationsWelcome = 'stream_avatar_automations_welcome',
+  HighlighterBanner = 'highlighter_banner',
 }
 
 interface IDismissablesServiceState {
@@ -49,7 +60,7 @@ export class DismissablesService extends PersistentStatefulService<IDismissables
   }
 
   dismissAll() {
-    Object.keys(EDismissable).forEach(key => this.dismiss(EDismissable[key]));
+    Object.values(EDismissable).forEach((key: EDismissable) => this.dismiss(key));
   }
 
   /**

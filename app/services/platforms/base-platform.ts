@@ -6,13 +6,21 @@ import {
   TPlatformCapability,
   TStartStreamOptions,
   TPlatformCapabilityMap,
+  TLiveDockFeature,
+  platformLabels,
 } from './index';
 import { StreamingService } from 'services/streaming';
 import { UserService } from 'services/user';
 import { HostsService } from 'services/hosts';
-import electron from 'electron';
+import { DualOutputService } from 'services/dual-output';
 import { IFacebookStartStreamOptions } from './facebook';
 import { StreamSettingsService } from '../settings/streaming';
+import * as remote from '@electron/remote';
+import { VideoSettingsService } from 'services/settings-v2/video';
+import { ENotificationType, NotificationsService } from 'services/notifications';
+import { IJsonRpcRequest } from 'services/api/jsonrpc';
+import { StreamError, throwStreamError, TStreamErrorType } from 'services/streaming/stream-error';
+import { $t } from 'services/i18n/i18n';
 
 const VIEWER_COUNT_UPDATE_INTERVAL = 60 * 1000;
 
@@ -32,13 +40,24 @@ export abstract class BasePlatformService<T extends IPlatformState> extends Stat
   @Inject() protected userService: UserService;
   @Inject() protected hostsService: HostsService;
   @Inject() protected streamSettingsService: StreamSettingsService;
+  @Inject() protected dualOutputService: DualOutputService;
+  @Inject() protected videoSettingsService: VideoSettingsService;
+  @Inject() protected notificationsService: NotificationsService;
+
   abstract readonly platform: TPlatform;
 
   abstract capabilities: Set<TPlatformCapability>;
 
+  abstract liveDockFeatures: Set<TLiveDockFeature>;
+
   @ExecuteInCurrentWindow()
   hasCapability<T extends TPlatformCapability>(capability: T): this is TPlatformCapabilityMap[T] {
     return this.capabilities.has(capability);
+  }
+
+  @ExecuteInCurrentWindow()
+  hasLiveDockFeature(feature: TLiveDockFeature) {
+    return this.liveDockFeatures.has(feature);
   }
 
   get mergeUrl() {
@@ -86,8 +105,8 @@ export abstract class BasePlatformService<T extends IPlatformState> extends Stat
     //   .then(handleResponse)
     //   .then(_ => this.userService.updateLinkedPlatforms());
 
-    electron.remote.shell.openExternal(
-      `https://${this.hostsService.streamlabs}/dashboard#/settings/account-settings`,
+    remote.shell.openExternal(
+      `https://${this.hostsService.streamlabs}/dashboard#/settings/account-settings/platforms`,
     );
   }
 
@@ -110,8 +129,57 @@ export abstract class BasePlatformService<T extends IPlatformState> extends Stat
     return EPlatformCallResult.Success;
   }
 
+  postNotification(
+    message: string,
+    type: ENotificationType = ENotificationType.WARNING,
+    action?: IJsonRpcRequest,
+  ) {
+    this.notificationsService.actions.push({
+      message,
+      type,
+      lifeTime: 5000,
+      action,
+    });
+  }
+
   fetchUserInfo() {
     return Promise.resolve({});
+  }
+
+  setPlatformContext(platform: TPlatform) {
+    const mode = this.streamingService.views.getPlatformMode(platform);
+    this.UPDATE_STREAM_SETTINGS({
+      mode,
+    });
+  }
+
+  throwPlatformError(
+    platform: TPlatform,
+    e: StreamError | any,
+    errorType: TStreamErrorType = 'PLATFORM_REQUEST_FAILED',
+  ): never {
+    console.error(`${platformLabels(platform)} Error: `, e);
+
+    if (e instanceof StreamError) {
+      throwStreamError(e.type, { ...e, platform }, e.details);
+    }
+
+    const message =
+      e.result?.data?.message ||
+      e.result?.message ||
+      e.statusText ||
+      e.message ||
+      $t('Unknown %{platform} error', { platform: platformLabels(platform) });
+
+    throwStreamError(
+      errorType,
+      {
+        status: e.status,
+        statusText: message,
+        platform,
+      },
+      message,
+    );
   }
 
   @mutation()

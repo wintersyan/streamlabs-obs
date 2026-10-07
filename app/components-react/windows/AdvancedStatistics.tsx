@@ -20,7 +20,7 @@ export default function AdvancedStatistics() {
     MediaBackupService,
   } = Services;
 
-  const { notifications, streamQuality, streamingStatus, syncStatus } = useVuex(() => ({
+  const { notifications, streamingStatus, syncStatus, streamQuality } = useVuex(() => ({
     notifications: NotificationsService.views
       .getAll()
       .filter(notification => notification.subType !== ENotificationSubType.DEFAULT),
@@ -32,13 +32,15 @@ export default function AdvancedStatistics() {
   // Forces a refresh on notification labels every minute
   useRenderInterval(() => {}, 60 * 1000);
 
+  // Do not use useSubscription here because the cleanup needs to do more than just unsubscribe, it also needs to
+  // mark all notifications as read
   useEffect(() => {
     const notificationPushedSub = NotificationsService.notificationPushed.subscribe(notify => {
       onNotificationHandler(notify);
     });
 
     return () => {
-      NotificationsService.markAllAsRead();
+      NotificationsService.actions.markAllAsRead();
       notificationPushedSub.unsubscribe();
     };
   }, []);

@@ -241,16 +241,15 @@ button {
 
 .square-button--tiktok,
 .button--tiktok {
-  background: var(--tiktok);
-  color: var(--black);
+  background: var(--tiktok-btn);
+  color: black;
 
   &:hover,
   &:active {
-    background: var(--tiktok) !important;
-    color: var(--black) !important;
+    background: var(--tiktok-btn) !important;
+    color: black !important;
   }
 }
-
 
 .square-button--twitter {
   background: var(--twitter);
@@ -261,16 +260,14 @@ button {
   }
 }
 
-.button--dlive {
-  background: #ffd300;
+.square-button--kick,
+.button--kick {
+  background: black;
+  color: var(--kick);
 
-  &:hover {
-    box-shadow: 0 3px 5px 0 rgba(255, 211, 0, 0.15) !important;
-  }
-
-  &:focus,
+  &:hover,
   &:active {
-    background: lighten(#ffd300, 4%) !important;
+    background: var(--kick-hover) !important;
   }
 }
 
@@ -288,18 +285,18 @@ button {
 }
 
 .button--soft-warning {
-  color: var(--warning);
-  background: rgba(251, 72, 76, 0.16);
-  border-color: transparent;
+  color: var(--warning) !important;
+  background: rgba(251, 72, 76, 0.16) !important;
+  border-color: transparent !important;
 
   &:focus {
-    color: var(--warning);
-    background: rgba(251, 72, 76, 0.16);
+    color: var(--warning) !important;
+    background: rgba(251, 72, 76, 0.16) !important;
   }
 
   &:hover {
-    background: rgba(251, 72, 76, 0.2);
-    color: var(--warning);
+    background: rgba(251, 72, 76, 0.2) !important;
+    color: var(--warning) !important;
   }
 }
 

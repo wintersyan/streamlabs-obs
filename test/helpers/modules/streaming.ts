@@ -7,9 +7,8 @@ import { getApiClient } from '../api-client';
 import {
   click,
   clickButton,
-  focusChild, getFocusedWindowId,
+  focusChild,
   isDisplayed,
-  select,
   selectButton,
   useChildWindow,
   useMainWindow,
@@ -19,8 +18,14 @@ import {
 } from './core';
 import { sleep } from '../sleep';
 import { fillForm, TFormData, useForm } from './forms';
-import { setOutputResolution } from './settings/settings';
+import { setOutputResolution, showSettingsWindow } from './settings/settings';
 import { StreamSettingsService } from '../../../app/services/settings/streaming';
+import {
+  WebsocketService,
+  IStreamShiftRequested,
+  IStreamShiftActionCompleted,
+} from '../../../app/services/websocket';
+import { RestreamService } from '../../../app/services/restream';
 
 /**
  * Go live and wait for stream start
@@ -48,8 +53,9 @@ export async function prepareToGoLive() {
  * It opens the EditStreamInfo window or start stream if the conformation dialog has been disabled
  */
 export async function clickGoLive() {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
-    await clickButton('Go Live');
+    await click('[data-name="StartStreamingButton"]');
   });
 }
 
@@ -59,14 +65,20 @@ export async function clickGoLive() {
 export async function tryToGoLive(prefillData?: Record<string, unknown>) {
   await prepareToGoLive();
   await clickGoLive();
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const { fillForm } = useForm('editStreamForm');
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useChildWindow(async () => {
     await waitForSettingsWindowLoaded();
     if (prefillData) {
       await fillForm(prefillData);
-      await sleep(500);
     }
+    // Small sleep in case there's network resources that need to be loaded (i.e Twitch category)
+    // FIXME: this technically makes all streaming tests slower, but helps with flakiness,
+    // we should make it more robust and only do this when needed (i.e Twitch logged in and category not present)
+    // and use an element assertion instead of a sleep
+    await sleep(1000);
     await submit();
   });
 }
@@ -82,6 +94,7 @@ export async function submit() {
 
 export async function waitForStreamStart() {
   // check we're streaming
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     await (await selectButton('End Stream')).waitForExist({ timeout: 20 * 1000 });
   });
@@ -91,6 +104,7 @@ export async function waitForStreamStart() {
  * Click the "End Stream" button and wait until stream stops
  */
 export async function stopStream() {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     await clickButton('End Stream');
     await waitForStreamStop();
@@ -101,18 +115,30 @@ export async function waitForStreamStop() {
   await sleep(2000); // the stream often starts with delay so we have the "Go Live" button visible for a second even we clicked "Start Stream"
   const ms = 40 * 1000; // we may wait for a long time if the stream key is not valid
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     try {
       await waitForDisplayed('button=Go Live', { timeout: ms });
-    } catch (e) {
+    } catch (e: unknown) {
       throw new Error(`Stream did not stop in ${ms}ms`);
     }
   });
 }
 
-export async function chatIsVisible() {
+export async function chatIsVisible(multistream: boolean = false) {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   return await useMainWindow(async () => {
-    return await isDisplayed('a=Refresh Chat');
+    if (multistream) {
+      return await isDisplayed('li=Multichat', {
+        timeout: 3000,
+        timeoutMsg: 'Multistream chat did not appear',
+      });
+    }
+
+    return await isDisplayed('a=Refresh Chat', {
+      timeout: 3000,
+      timeoutMsg: 'Refresh Chat did not appear',
+    });
   });
 }
 
@@ -127,10 +153,20 @@ export async function stopRecording() {
 }
 
 export async function waitForSettingsWindowLoaded() {
-  // the spinner can take some time to appear
-  await sleep(500);
-  // wait for at least one input to be displayed
-  return waitForDisplayed('[data-role="input"][data-type="text"]', { timeout: 15000 });
+  await waitForStreamShift();
+  await focusChild();
+  return waitForEnabled('[data-name=confirmGoLiveBtn]', { timeout: 15000 });
+}
+
+async function waitForStreamShift() {
+  // The "Another stream detected" prompt renders in the child window (GoLive)
+  // via promptAction (Ant Design modal). Check the child window for the prompt
+  // and dismiss it if found so the go live flow can proceed.
+  await focusChild();
+  const streamShifted = await isDisplayed('span=Another stream detected', { timeout: 5000 });
+  if (streamShifted) {
+    await click('span=Force Start');
+  }
 }
 
 export async function switchAdvancedMode() {
@@ -143,6 +179,7 @@ export async function switchAdvancedMode() {
  * Open liveDock and edit stream settings
  */
 export async function updateChannelSettings(prefillData: TFormData) {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     await click('.live-dock'); // open LiveDock
     await click('.icon-edit'); // click Edit
@@ -154,6 +191,7 @@ export async function updateChannelSettings(prefillData: TFormData) {
 }
 
 export async function openScheduler() {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     await click('.icon-date'); // open the StreamScheduler
     await waitForClickable('.ant-picker-calendar-month-select'); // wait for loading
@@ -165,6 +203,7 @@ export async function scheduleStream(date: Date, formData: TFormData) {
   const month = date.toLocaleString('default', { month: 'short' });
   const day = date.getDate();
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   await useMainWindow(async () => {
     await openScheduler();
 
@@ -185,4 +224,55 @@ export async function scheduleStream(date: Date, formData: TFormData) {
     await clickButton('Schedule');
     await waitForClickable('.ant-picker-calendar-month-select', { timeout: 10000 });
   });
+}
+
+/**
+ * Add streaming target
+ * @param name - name of the destination
+ * @param url - rtmp url
+ * @param streamKey - stream key
+ */
+export async function addCustomDestination(name: string, url: string, streamKey: string) {
+  await showSettingsWindow('Stream');
+  await click('span=Add Custom Destination');
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const { fillForm } = useForm();
+  await fillForm({
+    name,
+    url,
+    streamKey,
+  });
+  await clickButton('Save');
+}
+
+/**
+ * Mock a Stream Shift socket event
+ *
+ * @param type - 'streamSwitchRequest' (switch to another device) or
+ *               'switchActionComplete' (switch to the current device)
+ * @param identifier - stream id
+ */
+export async function fireStreamShiftSocketEvent(
+  type: IStreamShiftRequested['type'] | IStreamShiftActionCompleted['type'],
+  identifier: string,
+): Promise<void> {
+  const event: IStreamShiftRequested | IStreamShiftActionCompleted = {
+    type,
+    for: '',
+    data: { identifier },
+    event_id: `test_${type}`,
+  };
+  (await getApiClient())
+    .getResource<WebsocketService>('WebsocketService')
+    .sendSocketEventForTest(event);
+}
+
+/**
+ * Emit directly on RestreamService.isLive, triggering the GoLive window's subscription
+ * without going through the real HTTP API. Pass true to show the "Another stream detected"
+ * prompt; pass false to clear it.
+ */
+export async function fireIsLiveEvent(isLive: boolean): Promise<void> {
+  (await getApiClient()).getResource<RestreamService>('RestreamService').emitIsLiveForTest(isLive);
 }

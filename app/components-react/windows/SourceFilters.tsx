@@ -1,11 +1,11 @@
 import { Services } from 'components-react/service-provider';
-import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useState } from 'react';
 import Display from 'components-react/shared/Display';
 import { ModalLayout } from 'components-react/shared/ModalLayout';
 import { Button, Menu, Modal } from 'antd';
 import Scrollable from 'components-react/shared/Scrollable';
 import { ListInput, TextInput } from 'components-react/shared/inputs';
-import { useVuex } from 'components-react/hooks';
+import { useChildWindowParams, useVuex } from 'components-react/hooks';
 import Form, { useForm } from 'components-react/shared/inputs/Form';
 import { TObsFormData } from 'components/obs/inputs/ObsInput';
 import { ObsForm } from 'components-react/obs/ObsForm';
@@ -26,11 +26,9 @@ const FilterMenuContainer = forwardRef<HTMLUListElement>((props, ref) => {
 
 export default function SourceFilters() {
   const { WindowsService, SourceFiltersService, SourcesService, EditorCommandsService } = Services;
-  const sourceId = useMemo(() => WindowsService.getChildWindowQueryParams().sourceId, []);
+  const sourceId = useChildWindowParams('sourceId');
   const { filters, isVisual, preset } = useVuex(() => ({
-    filters: SourceFiltersService.views
-      .filtersBySourceId(sourceId)
-      ?.filter(f => f.name !== '__PRESET'),
+    filters: SourceFiltersService.views.filtersBySourceId(sourceId),
     isVisual: !!SourcesService.views.getSource(sourceId)?.video,
     preset: SourceFiltersService.views.presetFilterBySourceId(sourceId),
   }));
@@ -55,7 +53,7 @@ export default function SourceFilters() {
 
   function setPreset(val: string) {
     if (val === 'none') {
-      SourceFiltersService.actions.remove(sourceId, '__PRESET');
+      SourceFiltersService.actions.removePresetFilter(sourceId);
     } else {
       SourceFiltersService.actions.addPresetFilter(sourceId, val);
     }
@@ -69,6 +67,7 @@ export default function SourceFilters() {
 
   // There's no good way to make this reactive with good
   // performance currently, so we rely on events.
+  // Do not use useSubscription here because the subscription needs to update when the source id changes
   useEffect(() => {
     if (!selectedFilter) return;
     loadFormData(selectedFilter);
@@ -266,6 +265,7 @@ function CreateFilterForm(p: { sourceId: string; onSubmit: (filterName: string) 
   }
 
   function submit() {
+    //@ts-ignore typescript upgrade
     EditorCommandsService.actions.return
       .executeCommand('AddFilterCommand', p.sourceId, type, name)
       // @ts-ignore

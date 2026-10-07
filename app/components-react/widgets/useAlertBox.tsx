@@ -1,21 +1,23 @@
 import {
-  createAlertsMap,
   ICustomCode,
   IWidgetState,
   useWidget,
   WidgetModule,
 } from './common/useWidget';
-import { values, cloneDeep, intersection } from 'lodash';
+import values from 'lodash/values';
+import cloneDeep from 'lodash/cloneDeep';
+import intersection from 'lodash/intersection';
 import { IAlertConfig, TAlertType } from '../../services/widgets/alerts-config';
 import { createBinding } from '../shared/inputs';
 import { Services } from '../service-provider';
-import { mutation } from '../store';
 import { metadata } from '../shared/inputs/metadata';
 import { $t } from '../../services/i18n';
-import * as electron from 'electron';
 import { getDefined } from '../../util/properties-type-guards';
 import { TPlatform } from '../../services/platforms';
+import * as remote from '@electron/remote';
 import { IListOption } from '../shared/inputs/ListInput';
+import { injectFormBinding, mutation } from 'slap';
+import React from 'react';
 
 interface IAlertBoxState extends IWidgetState {
   data: {
@@ -44,7 +46,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
    * config for all events supported by users' platforms
    */
   get alerts() {
-    return this.state.availableAlerts.map(alertType => this.eventsConfig[alertType]);
+    return this.widgetState.availableAlerts.map(alertType => this.eventsConfig[alertType]);
   }
 
   /**
@@ -61,18 +63,22 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
    * returns settings for a given variation from the state
    */
   getVariationSettings<T extends TAlertType>(alertType: T, variationId = 'default') {
-    return this.state.data.variations[alertType][variationId];
+    const variations = this.widgetData.variations;
+    if (!variations) return null;
+    return this.widgetData.variations[alertType][variationId];
   }
 
   /**
    * 2-way bindings for general settings inputs
    */
-  bind = createBinding(
+  bind = injectFormBinding(
     // define source of values
-    () => this.settings,
+    () => this.settings as IAlertBoxState['data']['settings'],
     // define onChange handler
     statePatch => this.updateSettings(statePatch),
     // pull additional metadata like tooltip, label, min, max, etc...
+    // TODO: index
+    // @ts-ignore
     fieldName => this.generalMetadata[fieldName],
   );
 
@@ -95,6 +101,8 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
       },
       // pull additional metadata like tooltip, label, min, max, etc...
       fieldName => ({
+        // TODO: index
+        // @ts-ignore
         ...this.variationsMetadata[alertType as any][fieldName],
         hidden: hiddenFields.includes(fieldName as string),
       }),
@@ -112,8 +120,10 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
    * list of enabled alerts
    */
   get enabledAlerts() {
-    return Object.keys(this.state.data.variations).filter(
-      alertType => this.state.data.variations[alertType].default.enabled,
+    return Object.keys(this.widgetData.variations).filter(
+      // TODO: index
+      // @ts-ignore
+      alertType => this.widgetData.variations[alertType].default.enabled,
     );
   }
 
@@ -121,7 +131,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
    * available animations
    */
   get animationOptions() {
-    return this.state.data.animationOptions;
+    return this.widgetData.animationOptions;
   }
 
   /**
@@ -129,7 +139,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
    */
   get layout() {
     // more linked platforms require more space for the widget menu
-    return Services.StreamingService.views.linkedPlatforms.length < 3 ? 'basic' : 'long-menu';
+    return Services.UserService.views.linkedPlatforms.length < 3 ? 'basic' : 'long-menu';
   }
 
   /**
@@ -142,14 +152,15 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
   }
 
   /**
-   * @override
    * Patch and sanitize the AlertBox settings after fetching data from the server
    */
-  protected patchAfterFetch(data: any): any {
+  protected override patchAfterFetch(data: any): any {
     const settings = data.settings;
 
     // sanitize general settings
     Object.keys(settings).forEach(key => {
+      // TODO: index
+      // @ts-ignore
       settings[key] = this.sanitizeValue(settings[key], key, this.generalMetadata[key]);
     });
 
@@ -181,36 +192,40 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     return data;
   }
 
-  /**
-   * @override
-   */
-  setData(data: IAlertBoxState['data']) {
+  override setData(data: IAlertBoxState['data']) {
     // save widget data instate and calculate additional state variables
     super.setData(data);
-    const settings = data.settings;
-    const allAlerts = values(this.eventsConfig) as IAlertConfig[];
+    // Get all defined alert configurations, unimplemented alerts will show as undefined, so we filter
+    const allAlerts = values(this.eventsConfig).filter(x => x) as IAlertConfig[];
 
     // group alertbox settings by alert types and store them in `state.data.variations`
-    allAlerts.map(alertEvent => {
-      const apiKey = alertEvent.apiKey || alertEvent.type;
-      const alertFields = Object.keys(settings).filter(key => key.startsWith(`${apiKey}_`));
-      const variationSettings = {} as any;
-      alertFields.forEach(key => {
-        let value = settings[key];
-        const targetKey = key.replace(`${apiKey}_`, '');
+    this.state.mutate(state => {
+      const settings = this.state.widgetData.data.settings;
 
-        // sanitize the variation value
-        value = this.sanitizeValue(
-          value,
-          targetKey,
-          this.variationsMetadata[alertEvent.type][targetKey],
-        );
+      allAlerts.map(alertEvent => {
+        const apiKey = alertEvent.apiKey || alertEvent.type;
+        const alertFields = Object.keys(settings).filter(key => key.startsWith(`${apiKey}_`));
+        const variationSettings = {} as any;
+        alertFields.forEach(key => {
+          let value = settings[key];
+          const targetKey = key.replace(`${apiKey}_`, '');
 
-        settings[key] = value;
-        variationSettings[targetKey] = value;
+          // sanitize the variation value
+          value = this.sanitizeValue(
+            value,
+            targetKey,
+            // TODO: index
+            // @ts-ignore
+            this.variationsMetadata[alertEvent.type][targetKey],
+          );
+
+          settings[key] = value;
+          variationSettings[targetKey] = value;
+        });
+        this.setVariationSettings(alertEvent.type, 'default', variationSettings as any);
       });
-      this.setVariationSettings(alertEvent.type, 'default', variationSettings as any);
     });
+
 
     // define available alerts
     const userPlatforms = Object.keys(Services.UserService.views.platforms!) as TPlatform[];
@@ -219,7 +234,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
         if (alertConfig.platforms && !intersection(alertConfig.platforms, userPlatforms).length) {
           return false;
         }
-        return !!this.state.data.variations[alertConfig.type];
+        return !!this.widgetData.variations[alertConfig.type];
       })
       .map(alertConfig => alertConfig.type);
     this.setAvailableAlerts(availableAlerts);
@@ -292,7 +307,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
   ) {
     const event = this.eventsConfig[type];
     const apiKey = event.apiKey || event.type;
-    const currentVariationSettings = this.getVariationSettings(type);
+    const currentVariationSettings = getDefined(this.getVariationSettings(type));
 
     // save current settings to the state
     const newVariationSettings = {
@@ -304,12 +319,14 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     // flatten settings by adding prefixes
     const settingsPatch = {} as any;
     Object.keys(variationPatch).forEach(key => {
+      // TODO: index
+      // @ts-ignore
       settingsPatch[`${apiKey}_${key}`] = variationPatch[key];
     });
 
     // set the same message template for all Cheer variations
-    if (type === 'twCheer') {
-      const newBitsVariations = this.state.data.settings.bit_variations.map((variation: any) => {
+    if (type === 'bits') {
+      const newBitsVariations = this.widgetData.settings.bit_variations.map((variation: any) => {
         const newVariation = cloneDeep(variation);
         newVariation.settings.text.format = newVariationSettings.message_template;
         return newVariation;
@@ -318,29 +335,29 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     }
 
     // save flatten setting in store and save them on the server
-    this.updateSettings({ ...this.state.data.settings, ...settingsPatch });
+    this.updateSettings({ ...this.widgetData.settings, ...settingsPatch });
   }
 
   openAlertInfo(alertType: TAlertType) {
     const url = getDefined(this.eventsConfig[alertType].tooltipLink);
-    electron.remote.shell.openExternal(url);
+    remote.shell.openExternal(url);
   }
 
   get selectedAlert(): TAlertType | null {
     const selectedTab = this.state.selectedTab;
+    // TODO: index
+    // @ts-ignore
     if (this.eventsConfig[selectedTab]) {
       return selectedTab as TAlertType;
     }
     return null;
   }
 
-  /**
-   * @override
-   */
-  get customCode() {
+  override get customCode() {
     // get custom code from the selected variation
     if (!this.selectedAlert) return null;
     const variationSettings = this.getVariationSettings(this.selectedAlert);
+    if (!variationSettings) return null;
     const {
       custom_html_enabled,
       custom_html,
@@ -357,10 +374,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     };
   }
 
-  /**
-   * @override
-   */
-  updateCustomCode(patch: Partial<ICustomCode>) {
+  override updateCustomCode(patch: Partial<ICustomCode>) {
     // save custom code from the selected variation
     const selectedAlert = getDefined(this.selectedAlert);
     const newPatch = cloneDeep(patch) as Partial<ICustomCode> & { custom_html_enabled?: boolean };
@@ -380,7 +394,7 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     variationId: string,
     settings: TVariationsSettings[TAlertType],
   ) {
-    const state = this.state;
+    const state = this.widgetState;
     if (!state.data.variations) state.data.variations = {} as any;
     if (!state.data.variations[type]) state.data.variations[type] = {} as any;
     state.data.variations[type][variationId] = settings;
@@ -397,8 +411,8 @@ export class AlertBoxModule extends WidgetModule<IAlertBoxState> {
     alerts = topAlerts.concat(alerts.sort().filter(alert => !topAlerts.includes(alert)));
 
     // TODO: fbSupportGift is impossible to enable on backend
-    alerts = alerts.filter(alert => alert !== 'fbSupportGift');
-    this.state.availableAlerts = alerts;
+    alerts = alerts.filter(alert => alert !== 'facebook_support_gifter');
+    this.widgetState.availableAlerts = alerts;
   }
 }
 
@@ -433,6 +447,14 @@ function getGeneralSettingsMetadata() {
       max: 600000,
     }),
   };
+}
+
+/**
+ * This function ensures that given object have a key for each alert type
+ * Also it provides better experience for Typescript types related to widgets
+ */
+function createAlertsMap<T extends Record<TAlertType, Record<string, ReturnType<typeof metadata.any>>>>(obj: T): T {
+  return obj;
 }
 
 /**
@@ -484,51 +506,71 @@ function getVariationsMetadata() {
         min: 0,
       }),
     },
-    twFollow: {},
-    fbFollow: {},
-    twRaid: {
-      message_template: getMessageTemplateMetadata('twRaid'),
+    raid: {
+      message_template: getMessageTemplateMetadata('raid'),
     },
-    twHost: {},
-    twSubscription: {},
-    twCheer: {
-      message_template: getMessageTemplateMetadata('twCheer'),
+    bits: {
+      message_template: getMessageTemplateMetadata('bits'),
       alert_message_min_amount: metadata.number({
         label: $t('Min. Amount to Trigger Alert'),
         min: 0,
       }),
     },
-    ytSuperchat: {
+    power_up: {
+      message_template: getMessageTemplateMetadata('power_up'),
+      alert_message_min_amount: metadata.number({
+        label: $t('Min. Amount to Trigger Alert'),
+        min: 0,
+      }),
+      use_event_image: metadata.bool({ label: $t('Use Power-Up Image') }),
+    },
+    fanfunding: {
       alert_message_min_amount: metadata.number({
         label: $t('Min. Amount to Trigger Alert'),
         min: 0,
       }),
     },
-    fbStars: {
-      message_template: getMessageTemplateMetadata('fbStars'),
+    facebook_stars: {
+      message_template: getMessageTemplateMetadata('facebook_stars'),
       alert_message_min_amount: metadata.number({
         label: $t('Min. Amount to Trigger Alert'),
         min: 0,
       }),
     },
-    fbSupport: {
-      message_template: getMessageTemplateMetadata('fbSupport'),
+    facebook_support: {
+      message_template: getMessageTemplateMetadata('facebook_support'),
     },
-    fbSupportGift: {},
-    fbShare: {},
-    fbLike: {},
     merch: {
       message_template: getMessageTemplateMetadata('merch'),
       use_custom_image: metadata.bool({
         label: $t('Replace product image with custom image'),
       }),
     },
-    ytSubscriber: {},
-    ytMembership: {},
+    donordrive_donation: {},
+    eldonation: {},
+    facebook_follow: {},
+    facebook_like: {},
+    facebook_share: {},
+    facebook_support_gifter: {},
+    follow: {},
+    justgiving_donation: {},
+    loyalty_store_redemption: {},
+    membershipGift: {},
+    pledge: {},
+    resub: {},
+    sponsor: {},
+    streamlabscharitydonation: {},
+    sub: {},
+    subscriber: {},
+    tiltify_donation: {},
+    treat: {},
+    twitchcharitydonation: {},
   });
 
   // mix common and specific metadata and return it
   Object.keys(specificMetadata).forEach(alertType => {
+    // TODO: index
+    // @ts-ignore
     specificMetadata[alertType] = { ...commonMetadata, ...specificMetadata[alertType] };
   });
   return specificMetadata as {
@@ -541,41 +583,54 @@ function getVariationsMetadata() {
  * @param alert
  */
 function getMessageTemplateMetadata(alert?: TAlertType) {
-  const tooltipTextHeader =
-    $t('When an alert shows up, this will be the format of the message.') +
-    '\n' +
-    $t('Available Tokens: ') +
-    '\n';
-  let tooltipTokens = ' {name} ';
+  let basicTokens = '';
+  const tokenLines: [string, string][] = [];
 
   switch (alert) {
     case 'donation':
-    case 'twCheer':
-    case 'fbStars':
-    case 'fbSupport':
-      tooltipTokens =
-        ' {name} ' +
-        $t('The name of the donator') +
-        ', {amount} ' +
-        $t('The amount that was donated');
+    case 'bits':
+    case 'facebook_stars':
+    case 'facebook_support':
+      tokenLines.push(
+        ['{name}', $t('The name of the donator')],
+        ['{amount}', $t('The amount that was donated')],
+      );
       break;
-    case 'twRaid':
-      tooltipTokens =
-        ' {name} ' +
-        $t('The name of the streamer raiding you') +
-        ', {amount} ' +
-        $t('The number of viewers who joined the raid');
+    case 'power_up':
+      tokenLines.push(
+        ['{name} ', $t('The display name of the viewer who redeemed the Power-Up')],
+        ['{powerUpName} ', $t('The title of the Power-Up that was redeemed')],
+        ['{bitsSpent} ', $t('The number of Bits the viewer spent on the redemption')],
+        ['{message} ', $t('Any text the viewer provided when redeeming the Power-Up')],
+      );
       break;
     case 'merch':
-      tooltipTokens = '{name}, {product}';
+      basicTokens = '{name}, {product}';
+      break;
+    case 'raid':
+      tokenLines.push(
+        ['{name}', $t('The name of the streamer raiding you')],
+        ['{amount}', $t('The number of viewers who joined the raid')],
+      );
+      break;
+    default:
+      basicTokens = '{name}';
       break;
   }
 
-  const tooltip = tooltipTextHeader + tooltipTokens;
-
   return metadata.text({
     label: $t('Message Template'),
-    tooltip,
+    tooltip: (<div>
+      <div>{$t('When an alert shows up, this will be the format of the message.')}</div>
+      <div>{$t('Available Tokens:')} {basicTokens}</div>
+      {!!tokenLines.length && (
+        <ul style={{ paddingLeft: 0, listStylePosition: 'inside' }}>
+          {tokenLines.map(([token, desc]) => (
+            <li key={token}>{token}: {desc}</li>
+          ))}
+        </ul>
+      )}
+    </div>),
   });
 }
 

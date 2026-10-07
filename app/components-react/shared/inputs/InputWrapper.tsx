@@ -7,8 +7,10 @@ import { InputComponent, layoutPresets, TInputLayout } from './inputs';
 
 type TInputWrapperProps = FormItemProps & {
   nowrap?: boolean;
+  nolabel?: boolean;
   inputRef?: unknown;
   layout?: TInputLayout;
+  name?: string;
 };
 
 /**
@@ -17,8 +19,8 @@ type TInputWrapperProps = FormItemProps & {
  */
 export default InputComponent(function InputWrapper(p: TInputWrapperProps) {
   const layoutPreset = useLayout(p);
-  const formItemProps = omit(p, 'nowrap');
-  const label = p.label || ' ';
+  const formItemProps = omit(p, 'nowrap', 'nolabel');
+  const label = !p.nolabel ? p.label || ' ' : null;
 
   return p.nowrap ? (
     <>{p.children}</>
@@ -35,5 +37,7 @@ function useLayout(p: TInputWrapperProps) {
   const contextLayout = context?.layout;
   const wrapperLayout = p.layout;
   const layout = wrapperLayout || contextLayout || 'inline';
+  // TODO: index
+  // @ts-ignore
   return layoutPresets[layout] || {};
 }

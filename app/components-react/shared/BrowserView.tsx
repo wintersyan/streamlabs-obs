@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import electron from 'electron';
+import * as remote from '@electron/remote';
 import path from 'path';
 import cloneDeep from 'lodash/cloneDeep';
 import { I18nService } from 'services/i18n';
 import Utils from 'services/utils';
 import Spinner from 'components-react/shared/Spinner';
 import { Services } from 'components-react/service-provider';
-import { useVuex } from 'components-react/hooks';
+import electron from 'electron';
+import { onUnload } from 'util/unload';
+import { Button } from 'antd';
+import { publishBrowserViewRect } from './browser-view-rects';
 
 interface BrowserViewProps {
   src: string;
@@ -15,6 +18,9 @@ interface BrowserViewProps {
   setLocale?: boolean;
   enableGuestApi?: boolean;
   onReady?: (view: any) => void;
+  className?: string;
+  style?: React.CSSProperties;
+  emitUrlChange?: (url: string) => void;
 }
 
 export default function BrowserView(p: BrowserViewProps) {
@@ -23,10 +29,11 @@ export default function BrowserView(p: BrowserViewProps) {
   const [loading, setLoading] = useState(true);
   const sizeContainer = useRef<HTMLDivElement>(null);
 
-  const { hideStyleBlockers, theme } = useVuex(() => ({
-    hideStyleBlockers: WindowsService.state[Utils.getWindowId()].hideStyleBlockers,
-    theme: CustomizationService.state.theme,
-  }));
+  // Identity for the occlusion registry — see browser-view-rects.ts.
+  const viewKey = useRef(Symbol('browser-view'));
+
+  const { hideStyleBlockers } = WindowsService.state[Utils.getWindowId()];
+  const { theme } = CustomizationService.state;
 
   let currentPosition: IVec2;
   let currentSize: IVec2;
@@ -38,30 +45,49 @@ export default function BrowserView(p: BrowserViewProps) {
     opts.webPreferences.nodeIntegration = false;
 
     if (p.enableGuestApi) {
-      opts.webPreferences.enableRemoteModule = true;
       opts.webPreferences.contextIsolation = true;
       opts.webPreferences.preload = path.resolve(
-        electron.remote.app.getAppPath(),
+        remote.app.getAppPath(),
         'bundles',
-        'guest-api',
+        'guest-api.js',
       );
+      opts.webPreferences.sandbox = false;
     }
     return opts;
   }, [p.options]);
 
   const browserView = useRef<Electron.BrowserView | null>(null);
 
+  function urlChange(_: any, url: string) {
+    if (p.emitUrlChange) {
+      p.emitUrlChange(url);
+    }
+  }
+
   useEffect(() => {
-    browserView.current = new electron.remote.BrowserView(options);
+    browserView.current = new remote.BrowserView(options);
+    const webContents = browserView.current.webContents;
+
+    if (p.enableGuestApi) {
+      electron.ipcRenderer.sendSync('webContents-enableRemote', webContents.id);
+    }
+
     if (p.onReady) p.onReady(browserView.current);
     if (p.setLocale) I18nService.setBrowserViewLocale(browserView.current);
 
-    browserView.current.webContents.on('did-finish-load', () => setLoading(false));
-    electron.remote.getCurrentWindow().addBrowserView(browserView.current);
+    webContents.on('did-finish-load', () => setLoading(false));
+    webContents.on('did-navigate', urlChange);
+    webContents.on('did-navigate-in-page', urlChange);
+    remote.getCurrentWindow().addBrowserView(browserView.current);
 
     const shutdownSubscription = AppService.shutdownStarted.subscribe(destroyBrowserView);
 
+    const cancelUnload = onUnload(() => destroyBrowserView());
+
     return () => {
+      webContents.removeListener('did-navigate', urlChange);
+      webContents.removeListener('did-navigate-in-page', urlChange);
+      cancelUnload();
       destroyBrowserView();
       shutdownSubscription.unsubscribe();
     };
@@ -75,17 +101,43 @@ export default function BrowserView(p: BrowserViewProps) {
 
   useEffect(() => {
     loadUrl();
-  }, [theme]);
+  }, [theme, p.src]);
 
   function destroyBrowserView() {
+    publishBrowserViewRect(viewKey.current, null);
+
     if (browserView.current) {
-      electron.remote.getCurrentWindow().removeBrowserView(browserView.current);
+      remote.getCurrentWindow().removeBrowserView(browserView.current);
+
+      if (!browserView.current.webContents) {
+        browserView.current = null;
+        return;
+      }
+
+      // Attempt destruction of `webContents`
+      browserView.current.webContents.close();
+
+      if (!browserView.current.webContents) {
+        browserView.current = null;
+        return;
+      }
+
+      // If there was an error destroying the webContents, force destruction
+      // to prevent memory leaks.
       // See: https://github.com/electron/electron/issues/26929
       // @ts-ignore
       browserView.current.webContents.destroy();
       browserView.current = null;
     }
   }
+
+  useEffect(() => {
+    if (!loading && browserView.current && hideStyleBlockers) {
+      remote.getCurrentWindow().removeBrowserView(browserView.current);
+    } else if (!loading && browserView.current && !hideStyleBlockers) {
+      remote.getCurrentWindow().addBrowserView(browserView.current);
+    }
+  }, [hideStyleBlockers]);
 
   function checkResize() {
     if (loading) return;
@@ -108,6 +160,10 @@ export default function BrowserView(p: BrowserViewProps) {
           width: Math.round(currentSize.x),
           height: Math.round(currentSize.y),
         });
+        // The `p.hidden || hideStyleBlockers` branch above yields a zero rect, which
+        // the registry reads as "not covering" — that covers the removeBrowserView
+        // path below too, so it needs no hook of its own.
+        publishBrowserViewRect(viewKey.current, rect);
       }
     }
   }
@@ -120,8 +176,14 @@ export default function BrowserView(p: BrowserViewProps) {
       // ignore some common errors
       // that happen when the window has been closed before BrowserView accomplished the request
       if (e && typeof e === 'object') {
-        if (e['code'] === 'ERR_ABORTED') return;
-        if (e['message'] && e['message'].match(/\(\-3\) loading/)) return;
+        if (
+          (e.hasOwnProperty('code') &&
+            Object.getOwnPropertyDescriptor(e, 'code')?.value === 'ERR_ABORTED') ||
+          (e.hasOwnProperty('message') &&
+            Object.getOwnPropertyDescriptor(e, 'code')?.value.match(/\(\-3\) loading/))
+        ) {
+          return;
+        }
       }
       throw e;
     }
@@ -139,11 +201,25 @@ export default function BrowserView(p: BrowserViewProps) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Spinner />
+      <div
+        style={{
+          display: 'flex',
+          flexGrow: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Spinner visible pageLoader />
       </div>
     );
   }
 
-  return <div style={{ height: '100%' }} ref={sizeContainer} />;
+  function getCurrentUrl() {
+    if (!browserView.current) {
+      return '';
+    }
+    return browserView.current.webContents.getURL();
+  }
+
+  return <div style={{ height: '100%', ...p.style }} ref={sizeContainer} className={p.className} />;
 }

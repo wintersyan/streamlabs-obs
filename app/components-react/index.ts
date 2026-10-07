@@ -1,75 +1,111 @@
 import NameFolder from './windows/NameFolder';
+import NameScene from './windows/NameScene';
 import GoLiveWindow from './windows/go-live/GoLiveWindow';
 import EditStreamWindow from './windows/go-live/EditStreamWindow';
 import IconLibraryProperties from './windows/IconLibraryProperties';
 import ScreenCaptureProperties from './windows/ScreenCaptureProperties';
-import NewsBanner from './root/NewsBanner';
+import GuestCamProperties from './windows/GuestCamProperties';
+import News from './windows/notifications/News';
 import PerformanceMetrics from './shared/PerformanceMetrics';
-import PatchNotes from './pages/PatchNotes';
 import Display from './shared/Display';
 import TitleBar from './shared/TitleBar';
-import Chat from './root/Chat';
-import Highlighter from './pages/Highlighter';
-import Grow from './pages/grow/Grow';
-import Loader from './pages/Loader';
-import NavTools from './sidebar/NavTools';
 import PlatformLogo from './shared/PlatformLogo';
 import AdvancedStatistics from './windows/AdvancedStatistics';
-import StreamScheduler from './pages/stream-scheduler/StreamScheduler';
 import { createRoot } from './root/ReactRoot';
-import StartStreamingButton from './root/StartStreamingButton';
 import SourceProperties from './windows/SourceProperties';
-import TestWidgets from './root/TestWidgets';
 import RenameSource from './windows/RenameSource';
-import NotificationsArea from './root/NotificationsArea';
-import AppsNav from './sidebar/AppsNav';
-import StudioEditor from './root/StudioEditor';
 import SharedComponentsLibrary from './windows/sharedComponentsLibrary/SharedComponentsLibrary';
-import { ObsSettings } from './windows/settings/ObsSettings';
-import ThemeAudit from './pages/ThemeAudit';
+import ManageSceneCollections from './windows/ManageSceneCollections';
 import { WidgetWindow } from './widgets/common/WidgetWindow';
 import SafeMode from './windows/SafeMode';
 import AdvancedAudio from './windows/advanced-audio';
 import { CustomCodeWindow } from './widgets/common/CustomCode';
 import SourceShowcase from './windows/source-showcase';
 import SourceFilters from './windows/SourceFilters';
+import RecentEvents from './editor/elements/RecentEvents';
 import BrowserView from './shared/BrowserView';
+import MediaGallery from './windows/MediaGallery';
+import Projector from './windows/Projector';
+import AddSource from './windows/AddSource';
+import NavMenu from './nav-menu/NavMenu';
+import WelcomeToPrime from './windows/WelcomeToPrime';
+import Notifications from './windows/notifications/Notifications';
+import NotificationsAndNews from './windows/notifications';
+import MultistreamChatInfo from './windows/MultistreamChatInfo';
+import Blank from './windows/Blank';
+import PlatformAppPageView from './shared/PlatformAppPageView';
+import PlatformAppPopOut from './windows/PlatformAppPopOut';
+import RecentEventsWindow from './windows/RecentEvents';
+import DismissableBadge from './shared/DismissableBadge';
+import UltraIcon from './shared/UltraIcon';
+import EditTransform from './windows/EditTransform';
+import EditAutomations from './windows/stream-avatar-automations/EditAutomations';
+import KevinSupport from './agent/KevinSupport';
+import MarketingModal from './windows/MarketingModal';
+import Main from './windows/Main';
+import Loader from './pages/Loader';
+import StartStreamingButton from './root/StartStreamingButton';
+import TestWidgets from './root/TestWidgets';
+import ReactiveDataEditorWindow from './windows/reactive-data-editor/ReactiveDataEditorWindow';
+import { PlatformMerge, PlatformAppStore, PlatformAppMainPage } from './pages';
+import Settings from './windows/Settings';
+import Troubleshooter from './windows/Troubleshooter';
+import SceneTransitions from './windows/scene-transitions';
 
 // list of React components to be used inside Vue components
 export const components = {
   NameFolder,
+  NameScene,
   BrowserView,
   GoLiveWindow: createRoot(GoLiveWindow),
   EditStreamWindow: createRoot(EditStreamWindow),
   IconLibraryProperties,
   ScreenCaptureProperties,
-  NewsBanner,
+  GuestCamProperties: createRoot(GuestCamProperties),
+  News,
   PerformanceMetrics,
-  PatchNotes,
+  ManageSceneCollections,
   Display,
   TitleBar,
-  Chat,
-  Highlighter,
-  Grow,
-  Loader,
-  NavTools,
   PlatformLogo,
-  StreamScheduler: createRoot(StreamScheduler),
+  Projector,
   AdvancedStatistics,
   SourceProperties: createRoot(SourceProperties),
   SharedComponentsLibrary: createRoot(SharedComponentsLibrary),
-  StartStreamingButton,
-  TestWidgets,
   RenameSource,
-  NotificationsArea,
-  ObsSettings: createRoot(ObsSettings),
-  ThemeAudit,
-  AppsNav,
-  StudioEditor,
   WidgetWindow: createRoot(WidgetWindow),
   CustomCodeWindow: createRoot(CustomCodeWindow),
   SafeMode,
-  AdvancedAudio,
+  AdvancedAudio: createRoot(AdvancedAudio),
   SourceShowcase: createRoot(SourceShowcase),
   SourceFilters,
+  RecentEvents,
+  MediaGallery,
+  AddSource,
+  RecentEventsWindow,
+  NavMenu,
+  WelcomeToPrime,
+  Notifications,
+  NotificationsAndNews,
+  MultistreamChatInfo,
+  PlatformMerge,
+  PlatformAppStore,
+  PlatformAppMainPage,
+  PlatformAppPageView,
+  PlatformAppPopOut,
+  DismissableBadge,
+  UltraIcon,
+  EditTransform,
+  EditAutomations,
+  KevinSupport,
+  Blank,
+  MarketingModal,
+  Main: createRoot(Main),
+  Loader,
+  StartStreamingButton,
+  TestWidgets,
+  ReactiveDataEditorWindow,
+  Settings: createRoot(Settings),
+  Troubleshooter,
+  SceneTransitions,
 };

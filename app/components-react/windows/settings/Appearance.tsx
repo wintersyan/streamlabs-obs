@@ -1,25 +1,57 @@
+import { Button, Col, Row } from 'antd';
+import { useVuex } from 'components-react/hooks';
+import { useRealmObject } from 'components-react/hooks/realm';
+import { bindFormState } from 'components-react/shared/inputs';
+import UltraIcon from 'components-react/shared/UltraIcon';
 import React from 'react';
-import { Services } from '../../service-provider';
-import { $t } from '../../../services/i18n';
-import electron from 'electron';
-import { useBinding } from '../../store';
-import { CheckboxInput, ListInput, SliderInput } from '../../shared/inputs';
+import { CustomizationState } from 'services/customization';
+import { $t } from 'services/i18n';
+import { MAX_PINNED_APPS } from 'services/nav-menu';
 import { getDefined } from '../../../util/properties-type-guards';
+import { Services } from '../../service-provider';
+import { CheckboxInput, ListInput, SliderInput, SwitchInput } from '../../shared/inputs';
+import styles from './Appearance.m.less';
 import { ObsSettingsSection } from './ObsSettings';
-import { cloneDeep } from 'lodash';
 
 export function AppearanceSettings() {
-  const { CustomizationService, WindowsService, UserService, MagicLinkService } = Services;
+  const {
+    CustomizationService,
+    WindowsService,
+    UserService,
+    MagicLinkService,
+    NavMenuService,
+  } = Services;
 
-  const bind = useBinding(
-    () => cloneDeep(CustomizationService.state),
-    newSettings => {
-      CustomizationService.actions.setSettings(newSettings);
-    },
+  // Hooks up reactivity for Customization state
+  useRealmObject(CustomizationService.state);
+
+  const bind = bindFormState(
+    () => CustomizationService.state.toObject() as CustomizationState,
+    (newSettings: CustomizationState) => CustomizationService.setSettings(newSettings as any),
   );
 
+  const {
+    availableMenuItems,
+    isLoggedIn,
+    isPrime,
+    toggleMenuItem,
+    resetMenuItems,
+    pinnableApps,
+    pinnedAppIds,
+    setAppPinned,
+  } = useVuex(() => ({
+    availableMenuItems: NavMenuService.availableMenuItems,
+    isLoggedIn: UserService.views.isLoggedIn,
+    isPrime: UserService.views.isPrime,
+    toggleMenuItem: NavMenuService.actions.toggleMenuItem,
+    resetMenuItems: NavMenuService.actions.resetMenuItems,
+    pinnableApps: NavMenuService.pinnableApps,
+    pinnedAppIds: NavMenuService.pinnedApps.map(app => app.id),
+    setAppPinned: NavMenuService.actions.setAppPinned,
+  }));
+
   function openFFZSettings() {
-    WindowsService.createOneOffWindow(
+    WindowsService.actions.createOneOffWindow(
       {
         componentName: 'FFZSettings',
         title: $t('FrankerFaceZ Settings'),
@@ -34,47 +66,42 @@ export function AppearanceSettings() {
   }
 
   async function upgradeToPrime() {
-    const link = await MagicLinkService.getDashboardMagicLink('prime-marketing', 'slobs-ui-themes');
-    electron.remote.shell.openExternal(link);
+    MagicLinkService.actions.linkToPrime('slobs-ui-themes');
   }
 
-  const shouldShowPrime = UserService.views.isLoggedIn && !UserService.views.isPrime;
-  const shouldShowEmoteSettings =
-    UserService.views.isLoggedIn && getDefined(UserService.platform).type === 'twitch';
+  const shouldShowPrime = isLoggedIn && !isPrime;
+  const shouldShowEmoteSettings = isLoggedIn && getDefined(UserService.platform).type === 'twitch';
 
   return (
-    <div>
+    <div className={styles.container}>
       <ObsSettingsSection>
         <ListInput {...bind.theme} label={'Theme'} options={CustomizationService.themeOptions} />
         {shouldShowPrime && (
           <div style={{ marginBottom: '16px' }}>
-            <a style={{ color: 'var(--prime)' }} onClick={upgradeToPrime}>
-              <i style={{ color: 'var(--prime)' }} className="icon-prime" />
-              {$t('Change the look of Streamlabs Desktop with Prime')}
+            <a onClick={upgradeToPrime}>
+              <UltraIcon
+                type={CustomizationService.isDarkTheme ? 'night' : 'day'}
+                style={{
+                  display: 'inline-block',
+                  height: '12px',
+                  width: '12px',
+                  marginRight: '5px',
+                }}
+              />
+              {$t('Change the look of Streamlabs Desktop with Ultra')}
             </a>
           </div>
         )}
       </ObsSettingsSection>
 
-      <ObsSettingsSection>
-        <ListInput
-          {...bind.folderSelection}
-          label={$t('Scene item selection mode')}
-          options={[
-            { value: true, label: $t('Single click selects group. Double click selects item') },
-            {
-              value: false,
-              label: $t('Double click selects group. Single click selects item'),
-            },
-          ]}
-        />
+      <ObsSettingsSection title={$t('Chat Settings')}>
         <CheckboxInput
           {...bind.leftDock}
           label={$t('Show the live dock (chat) on the left side')}
         />
         <SliderInput
           {...bind.chatZoomFactor}
-          label={$t('Chat Text Size')}
+          label={$t('Text Size')}
           tipFormatter={(val: number) => `${val * 100}%`}
           min={0.25}
           max={2}
@@ -95,6 +122,76 @@ export function AppearanceSettings() {
         )}
       </ObsSettingsSection>
 
+      <ObsSettingsSection title={$t('Custom Navigation Bar')}>
+        {/* Main nav item show/hide toggles */}
+        <Row className={styles.navMenuSettings}>
+          <Col flex={1} className={styles.menuControls}>
+            {availableMenuItems.map(({ key, title, isVisible, isLocked }) => (
+              <SwitchInput
+                key={key}
+                label={title}
+                layout="horizontal"
+                onChange={val => toggleMenuItem(key, val)}
+                value={isVisible}
+                disabled={!isLoggedIn || isLocked}
+              />
+            ))}
+            <Button
+              className={`button--soft-warning ${styles.resetNavMenu}`}
+              onClick={() => resetMenuItems()}
+              disabled={!isLoggedIn}
+            >
+              {$t('Restore Defaults')}
+            </Button>
+          </Col>
+        </Row>
+      </ObsSettingsSection>
+
+      {isLoggedIn && pinnableApps.length > 0 && (
+        <ObsSettingsSection title={$t('Pinned Apps')}>
+          <p>{$t('Pin up to %{count} apps to the navigation bar.', { count: MAX_PINNED_APPS })}</p>
+          <Row className={styles.navMenuSettings}>
+            <Col flex={1} className={styles.menuControls}>
+              {pinnableApps.map(app => {
+                const isPinned = pinnedAppIds.includes(app.id);
+                return (
+                  <SwitchInput
+                    key={app.id}
+                    label={app.name}
+                    layout="horizontal"
+                    value={isPinned}
+                    onChange={val => setAppPinned(app.id, val)}
+                    disabled={!isPinned && pinnedAppIds.length >= MAX_PINNED_APPS}
+                  />
+                );
+              })}
+            </Col>
+          </Row>
+        </ObsSettingsSection>
+      )}
+
+      <ObsSettingsSection>
+        <CheckboxInput
+          {...bind.enableAnnouncements}
+          label={$t('Show announcements for new Streamlabs features and products')}
+          className={styles.extraMargin}
+        />
+      </ObsSettingsSection>
+
+      <ObsSettingsSection className={styles.extraMargin}>
+        <ListInput
+          {...bind.folderSelection}
+          label={$t('Scene item selection mode')}
+          options={[
+            { value: true, label: $t('Single click selects group. Double click selects item') },
+            {
+              value: false,
+              label: $t('Double click selects group. Single click selects item'),
+            },
+          ]}
+        />
+      </ObsSettingsSection>
+
       {bind.enableFFZEmotes.value && (
         <div className="section">
           <button className="button button--action" onClick={openFFZSettings}>
@@ -105,5 +202,3 @@ export function AppearanceSettings() {
     </div>
   );
 }
-
-AppearanceSettings.page = 'Appearance';

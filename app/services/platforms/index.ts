@@ -1,13 +1,19 @@
 import { ITwitchStartStreamOptions, TwitchService } from './twitch';
 import { IYoutubeStartStreamOptions, YoutubeService } from './youtube';
 import { FacebookService, IFacebookStartStreamOptions } from './facebook';
-import { ITiktokStartStreamOptions, TiktokService } from './tiktok';
-import { TTwitchTag } from './twitch/tags';
-import { TTwitchOAuthScope } from './twitch/scopes';
+import { ITikTokStartStreamOptions, TikTokService } from './tiktok';
+import { InstagramService, IInstagramStartStreamOptions } from './instagram';
+import { ITwitterStartStreamOptions, TwitterPlatformService } from './twitter';
+import { TTwitchOAuthScope } from './twitch/index';
 import { IGoLiveSettings } from 'services/streaming';
 import { WidgetType } from '../widgets';
+import { TDisplayType } from 'services/settings-v2';
+import { $t } from 'services/i18n';
+import { KickService, IKickStartStreamOptions } from './kick';
+import { PatreonService, IPatreonStartStreamOptions } from './patreon';
+import type { StreamError, TStreamErrorType } from 'services/streaming/stream-error';
 
-export type Tag = TTwitchTag;
+export type Tag = string;
 export interface IGame {
   id: string;
   name: string;
@@ -45,6 +51,8 @@ export type TPlatformCapabilityMap = {
   resolutionPreset: IPlatformCapabilityResolutionPreset;
   /** This service supports fetching viewersCount **/
   viewerCount: IPlatformCapabilityViewerCount;
+  /** This service may simultaneously stream both the horizontal and vertical displays in dual output mode*/
+  dualStream: true;
 };
 
 export type TPlatformCapability = keyof TPlatformCapabilityMap;
@@ -55,6 +63,8 @@ interface IPlatformCapabilityChat {
 
 export interface IPlatformCapabilityGame {
   searchGames: (searchString: string) => Promise<IGame[]>;
+  fetchGame: (id: string) => Promise<IGame>;
+  gameImageSize: { width: number; height: number };
   state: { settings: { game: string } };
 }
 
@@ -73,7 +83,6 @@ interface IPlatformCapabilityDescription {
 }
 
 interface IPlatformCapabilityTags {
-  getAllTags: () => Promise<Tag[]>;
   getStreamTags: () => Promise<Tag[]>;
   setStreamTags: () => Promise<any>;
 }
@@ -128,13 +137,37 @@ export enum EPlatformCallResult {
    * The user is missing an essential Twitch scope.
    */
   TwitchScopeMissing,
+
+  /**
+   * The user is not authorized for livestreaming by TikTok.
+   */
+  TikTokStreamScopeMissing,
+
+  /**
+   * The user needs to re-merge their to update Live Access status.
+   */
+  TikTokScopeOutdated,
+
+  /**
+   * The user needs to re-login to update Kick scope.
+   */
+  KickScopeOutdated,
+
+  /**
+   * Token expired
+   */
+  TokenExpired,
 }
 
 export type TStartStreamOptions =
   | ITwitchStartStreamOptions
   | IYoutubeStartStreamOptions
   | Partial<IFacebookStartStreamOptions>
-  | Partial<ITiktokStartStreamOptions>;
+  | Partial<ITikTokStartStreamOptions>
+  | Partial<IInstagramStartStreamOptions>
+  | Partial<IKickStartStreamOptions>
+  | Partial<IPatreonStartStreamOptions>
+  | Partial<ITwitterStartStreamOptions>;
 
 // state applicable for all platforms
 export interface IPlatformState {
@@ -144,10 +177,17 @@ export interface IPlatformState {
   isPrepopulated: boolean;
 }
 
+export interface IPlatformErrorCallbackProps {
+  e: any;
+  reqInfo: IPlatformRequest | string;
+  errorType?: TStreamErrorType;
+}
+
 // All platform services should implement this interface.
 export interface IPlatformService {
   capabilities: Set<TPlatformCapability>;
   hasCapability<T extends TPlatformCapability>(capability: T): this is TPlatformCapabilityMap[T];
+  hasLiveDockFeature(feature: TLiveDockFeature): boolean;
 
   authWindowOptions: Electron.BrowserWindowConstructorOptions;
 
@@ -160,14 +200,14 @@ export interface IPlatformService {
 
   fetchUserInfo: () => Promise<IUserInfo>;
 
-  putChannelInfo: (channelInfo: TStartStreamOptions) => Promise<void>;
+  putChannelInfo(channelInfo: TStartStreamOptions): Promise<void>;
 
   searchGames?: (searchString: string) => Promise<IGame[]>;
 
   /**
    * Sets up the stream key and live broadcast info required to go live.
    */
-  beforeGoLive: (options?: IGoLiveSettings) => Promise<void>;
+  beforeGoLive: (options?: IGoLiveSettings, context?: TDisplayType) => Promise<void>;
 
   afterGoLive: () => Promise<void>;
 
@@ -177,12 +217,29 @@ export interface IPlatformService {
 
   scheduleStream?: (startTime: number, info: TStartStreamOptions) => Promise<any>;
 
+  setupDualStream?: (options: IGoLiveSettings) => Promise<any>;
+
+  setupStreamShiftStream?: (options: IGoLiveSettings) => Promise<void>;
+
+  setupLiveOutputStream?: (options: IGoLiveSettings) => Promise<void>;
+
+  postNotification?: (message: string) => void;
+
+  createPlatformError?: (
+    e: any,
+    reqInfo: IPlatformRequest | string,
+    errorType?: TStreamErrorType,
+    fn?: (p: IPlatformErrorCallbackProps) => void,
+  ) => StreamError | undefined;
+
   fetchNewToken: () => Promise<void>;
 
   getHeaders: (
     req: IPlatformRequest,
     useToken?: boolean | string,
   ) => Dictionary<string | undefined>;
+
+  setPlatformContext?: (platform: TPlatform) => void;
 
   liveDockEnabled: boolean;
 
@@ -191,7 +248,9 @@ export interface IPlatformService {
   readonly displayName: string;
   readonly mergeUrl: string;
   readonly streamPageUrl: string;
+  readonly verticalStreamPageUrl?: string;
   readonly chatUrl: string;
+  readonly dashboardUrl?: string;
 
   /**
    * the list of widgets supported by the platform
@@ -201,38 +260,6 @@ export interface IPlatformService {
   unlink: () => void;
 
   state: IPlatformState;
-}
-
-export interface IUserAuth {
-  widgetToken: string;
-  apiToken: string; // Streamlabs API Token
-
-  /**
-   * Old key from when SLOBS only supported a single platform account
-   * @deprecated Use `platforms` instead
-   */
-  platform?: IPlatformAuth;
-
-  /**
-   * The primary platform used for chat, go live window, etc
-   */
-  primaryPlatform: TPlatform;
-
-  /**
-   * New key that supports multiple logged in platforms
-   */
-  platforms: { [platform in TPlatform]?: IPlatformAuth };
-
-  /**
-   * Session partition used to separate cookies associated
-   * with this user login.
-   */
-  partition?: string;
-
-  /**
-   * Whether re-login has been forced
-   */
-  hasRelogged: boolean;
 }
 
 export interface IPlatformAuth {
@@ -247,17 +274,77 @@ export interface IUserInfo {
   username?: string;
 }
 
-export type TPlatform = 'twitch' | 'youtube' | 'facebook' | 'tiktok';
+export type TLiveDockFeature =
+  | 'chat-offline'
+  | 'chat-streaming'
+  | 'dashboard'
+  | 'view-stream'
+  | 'refresh-chat'
+  | 'refresh-chat-streaming'
+  | 'refresh-chat-restreaming';
+
+export enum EPlatform {
+  Twitch = 'twitch',
+  YouTube = 'youtube',
+  Facebook = 'facebook',
+  TikTok = 'tiktok',
+  Twitter = 'twitter',
+  Instagram = 'instagram',
+  Kick = 'kick',
+  Patreon = 'patreon',
+}
+
+export type TPlatform =
+  | 'twitch'
+  | 'youtube'
+  | 'facebook'
+  | 'tiktok'
+  | 'twitter'
+  | 'instagram'
+  | 'kick'
+  | 'patreon';
+
+export const platformList = [
+  EPlatform.Twitch,
+  EPlatform.YouTube,
+  EPlatform.TikTok,
+  EPlatform.Kick,
+  EPlatform.Patreon,
+  EPlatform.Facebook,
+  EPlatform.Twitter,
+  EPlatform.Instagram,
+];
+
+export const platformLabels = (platform: TPlatform | string) =>
+  ({
+    [EPlatform.Twitch]: $t('Twitch'),
+    [EPlatform.YouTube]: $t('YouTube'),
+    [EPlatform.Facebook]: $t('Facebook'),
+    [EPlatform.TikTok]: $t('TikTok'),
+    [EPlatform.Twitter]: 'X',
+    [EPlatform.Instagram]: $t('Instagram'),
+    [EPlatform.Kick]: $t('Kick'),
+    [EPlatform.Patreon]: $t('Patreon'),
+    nimotv: 'NimoTV',
+  }[platform] || '');
 
 export function getPlatformService(platform: TPlatform): IPlatformService {
   return {
     twitch: TwitchService.instance,
     youtube: YoutubeService.instance,
     facebook: FacebookService.instance,
-    tiktok: TiktokService.instance,
+    tiktok: TikTokService.instance,
+    kick: KickService.instance,
+    twitter: TwitterPlatformService.instance,
+    instagram: InstagramService.instance,
+    patreon: PatreonService.instance,
   }[platform];
 }
 
 export interface IPlatformRequest extends RequestInit {
   url: string;
 }
+
+export const externalAuthPlatforms = ['twitch', 'youtube', 'tiktok', 'kick', 'patreon', 'twitter'];
+
+export const maxNumPlatforms = platformList.length;

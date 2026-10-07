@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, memo, useCallback } from 'react';
 import { IBinding, IHotkey } from 'services/hotkeys';
 import { TextInput } from 'components-react/shared/inputs';
 import { byOS, OS } from 'util/operating-systems';
 import Form from './inputs/Form';
 import { Input } from 'antd';
+import { Services } from 'components-react/service-provider';
+import { useVuex } from 'components-react/hooks';
 
 /**
  * Turns a binding into a string representation
@@ -36,7 +38,7 @@ export function getBindingString(binding: IBinding) {
 function getHotkeyString(binding: IBinding | null, focused = false) {
   if (focused) return 'Press any key combination...';
 
-  if (binding) {
+  if (binding?.key) {
     return `${getBindingString(binding)} (Click to re-bind)`;
   } else {
     return 'Click to bind';
@@ -49,7 +51,9 @@ function isModifierPress(event: React.KeyboardEvent<HTMLInputElement>) {
   );
 }
 
-function getModifiers(event: React.KeyboardEvent<HTMLInputElement>) {
+function getModifiers(
+  event: React.KeyboardEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>,
+) {
   return {
     alt: event.altKey,
     ctrl: event.ctrlKey,
@@ -62,13 +66,15 @@ export default function HotkeyBinding(p: {
   hotkey: IHotkey;
   binding: IBinding | null;
   onBind: (binding: IBinding) => void;
+  style?: React.CSSProperties;
+  showLabel?: boolean;
 }) {
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<Input>(null);
 
   function handlePress(event: React.KeyboardEvent<HTMLInputElement>) {
     // We don't allow binding a modifier by instelf
-    if (isModifierPress(event)) return;
+    if (isModifierPress(event) || !focused) return;
 
     event.preventDefault();
 
@@ -79,17 +85,82 @@ export default function HotkeyBinding(p: {
     if (inputRef.current) inputRef.current.blur();
   }
 
+  function handleClick(event: React.MouseEvent<HTMLInputElement>) {
+    const key = event.button;
+    const isPrimaryButton = key === 0 || key === 2;
+    if (!focused || isPrimaryButton) return;
+
+    event.preventDefault();
+
+    const code: Record<number, string> = {
+      1: 'MiddleMouseButton',
+      3: 'X1MouseButton',
+      4: 'X2MouseButton',
+    };
+
+    p.onBind({
+      key: code[key],
+      modifiers: getModifiers(event),
+    });
+    if (inputRef.current) inputRef.current.blur();
+  }
+
   return (
     <Form layout="inline">
       <TextInput
-        style={{ width: 400 }}
-        label={p.hotkey.description}
+        name="binding"
+        style={{ width: 400, ...p.style }}
+        label={<HotkeyLabel showLabel={p.showLabel ?? true} hotkey={p.hotkey} />}
         value={getHotkeyString(p.binding, focused)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={handlePress}
+        onMouseDown={handleClick}
         inputRef={inputRef}
       />
     </Form>
   );
 }
+
+const HotkeyLabel = memo(function HotkeyLabel(p: { hotkey: IHotkey; showLabel: boolean }) {
+  const { MarkersService, DualOutputService } = Services;
+
+  const v = useVuex(() => ({
+    dualOutputMode: DualOutputService.views.dualOutputMode,
+    setMarkerName: MarkersService.actions.setMarkerName,
+    getLabel: MarkersService.views.getLabel,
+  }));
+
+  const showDualOutputLabel = useMemo(() => {
+    return p.hotkey.actionName !== 'SWITCH_TO_SCENE' && p.hotkey.sceneItemId !== undefined;
+  }, [p.hotkey, v.dualOutputMode]);
+
+  const handleLabel = useCallback(
+    (value: string) => {
+      v.setMarkerName(p.hotkey.actionName, value);
+    },
+    [p.hotkey.actionName, v.setMarkerName],
+  );
+
+  const label = useMemo(() => v.getLabel(p.hotkey.actionName), [p.hotkey.actionName, v.getLabel]);
+
+  const icon = useMemo(
+    () => (p.hotkey?.display === 'vertical' ? 'icon-phone-case' : 'icon-desktop'),
+    [p.hotkey?.display],
+  );
+
+  return (
+    <>
+      {p.showLabel && (
+        <>
+          {showDualOutputLabel && <i className={icon} style={{ margin: '5px', opacity: 0.6 }} />}
+          {p.hotkey.isMarker ? (
+            <TextInput value={label} onChange={handleLabel} nowrap />
+          ) : (
+            p.hotkey.description || ''
+          )}
+        </>
+      )}
+    </>
+  );
+});

@@ -16,6 +16,7 @@ const nameMap = () => ({
   tips: $t('Tips & Donations'),
   twitch_follows: $t('Twitch Follows'),
   twitch_bits: $t('Twitch Bits'),
+  twitch_power_ups: $t('Twitch Power-Ups'),
   twitch_subs: $t('Twitch Subs'),
   twitch_resubs: $t('Twitch Resubs'),
   youtube_subscribers: $t('YouTube Subscriptions'),
@@ -67,7 +68,7 @@ export default class TipJar extends WidgetSettings<ITipJarData, TipJarService> {
     ];
   }
 
-  titleFromKey(key: string) {
+  titleFromKey(key: keyof typeof nameMap) {
     return nameMap()[key];
   }
 
@@ -82,8 +83,11 @@ export default class TipJar extends WidgetSettings<ITipJarData, TipJarService> {
   }
 
   get mediaGalleryInputs() {
-    if (!mediaGalleryInputs[this.platform]) return [];
-    return mediaGalleryInputs[this.platform];
+    if (!Object.keys(mediaGalleryInputs).includes(this.platform)) {
+      return [];
+    }
+
+    return mediaGalleryInputs[this.platform as keyof typeof mediaGalleryInputs];
   }
 
   afterFetch() {

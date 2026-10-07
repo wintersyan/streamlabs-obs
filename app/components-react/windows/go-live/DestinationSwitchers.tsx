@@ -1,173 +1,488 @@
-import React, { useRef, MouseEvent } from 'react';
-import { getPlatformService, TPlatform } from '../../../services/platforms';
+import React, {
+  useRef,
+  useMemo,
+  useImperativeHandle,
+  forwardRef,
+  MouseEvent,
+  memo,
+  useCallback,
+} from 'react';
+import { getPlatformService, platformLabels, TPlatform } from '../../../services/platforms';
 import cx from 'classnames';
 import { $t } from '../../../services/i18n';
 import styles from './DestinationSwitchers.m.less';
 import { ICustomStreamDestination } from '../../../services/settings/streaming';
-import { Services } from '../../service-provider';
-import { SwitchInput } from '../../shared/inputs';
 import PlatformLogo from '../../shared/PlatformLogo';
-import { assertIsDefined } from '../../../util/properties-type-guards';
 import { useDebounce } from '../../hooks';
 import { useGoLiveSettings } from './useGoLiveSettings';
-import { alertAsync } from '../../modals';
+import DisplaySelector from 'components-react/shared/DisplaySelector';
+import { alertInfo } from '../../modals';
+import { SwitcherCard, ISwitcherCardHandle } from './SwitcherCard';
+import AnimatedWrapper from 'components-react/shared/AnimatedWrapper';
 
 /**
  * Allows enabling/disabling platforms and custom destinations for the stream
  */
-export function DestinationSwitchers() {
+export const DestinationSwitchers = memo((p: { disabled?: boolean }) => {
   const {
-    linkedPlatforms,
     enabledPlatforms,
     customDestinations,
+    enabledDestinations,
     switchPlatforms,
     switchCustomDestination,
-    checkPrimaryPlatform,
-  } = useGoLiveSettings().select();
+    renderedPlatforms,
+    isDualOutputMode,
+    isPrime,
+    disableCustomDestinationSwitchers,
+    disableNonUltraSwitchers,
+    nonPrimeBothDisplayPlatform,
+    getUsername,
+    isLoading,
+    isFacebookGrandfathered,
+    isTikTokGrandfathered,
+    activeDisplayPlatforms,
+    isUpdateMode,
+    isLiveOutputEditingEnabled,
+  } = useGoLiveSettings().extend(module => ({
+    get renderedPlatforms() {
+      // Some platforms are always shown, even if not linked so add them to the list of platforms to display
+      const unlinkedAlwaysShownPlatforms = module.alwaysShownPlatforms.filter(
+        platform => !module.isPlatformLinked(platform),
+      );
+
+      return unlinkedAlwaysShownPlatforms.length
+        ? module.linkedPlatforms.concat(unlinkedAlwaysShownPlatforms)
+        : module.linkedPlatforms;
+    },
+  }));
+
+  // Use these references to apply debounce for error handling and switch animation
   const enabledPlatformsRef = useRef(enabledPlatforms);
   enabledPlatformsRef.current = enabledPlatforms;
+  const enabledDestRef = useRef(enabledDestinations);
+  enabledDestRef.current = enabledDestinations;
 
-  const emitSwitch = useDebounce(500, () => {
-    switchPlatforms(enabledPlatformsRef.current);
+  const disabledHorizontalUltraSwitcher = useMemo(() => {
+    // In live output editing, the user is able to toggle platforms freely, so don't disable any switchers
+    if (isLiveOutputEditingEnabled) return null;
+    // In dual output mode, if there is only one platform for a display orientation, disable the switcher for that platform
+    if (
+      isDualOutputMode &&
+      isPrime &&
+      isUpdateMode &&
+      activeDisplayPlatforms.horizontal.length < 2
+    ) {
+      return activeDisplayPlatforms.horizontal[0];
+    }
+
+    // By default, don't disable any switchers
+    return null;
+  }, [isDualOutputMode, isPrime, isUpdateMode, activeDisplayPlatforms, isLiveOutputEditingEnabled]);
+
+  const disabledVerticalUltraSwitcher = useMemo(() => {
+    // In live output editing, the user is able to toggle platforms freely, so don't disable any switchers
+    if (isLiveOutputEditingEnabled) return null;
+    // In dual output mode, if there is only one platform for a display orientation, disable the switcher for that platform
+    if (isDualOutputMode && isPrime && isUpdateMode && activeDisplayPlatforms.vertical.length < 2) {
+      return activeDisplayPlatforms.vertical[0];
+    }
+
+    // By default, don't disable any switchers
+    return null;
+  }, [isDualOutputMode, isPrime, isUpdateMode, activeDisplayPlatforms, isLiveOutputEditingEnabled]);
+
+  const emitSwitch = useDebounce(500, (ind?: number, enabled?: boolean) => {
+    if (ind !== undefined && enabled !== undefined) {
+      switchCustomDestination(ind, enabled);
+    } else {
+      switchPlatforms(enabledPlatformsRef.current);
+    }
   });
 
-  function isEnabled(platform: TPlatform) {
-    return enabledPlatformsRef.current.includes(platform);
-  }
+  const isEnabled = useCallback(
+    (target: TPlatform | number) => {
+      if (typeof target === 'number') {
+        return enabledDestRef.current.includes(target);
+      } else {
+        return enabledPlatformsRef.current.includes(target);
+      }
+    },
+    [enabledDestRef, enabledPlatformsRef],
+  );
 
-  function togglePlatform(platform: TPlatform, enabled: boolean) {
-    enabledPlatformsRef.current = enabledPlatformsRef.current.filter(p => p !== platform);
-    if (enabled) enabledPlatformsRef.current.push(platform);
-    emitSwitch();
-  }
+  const togglePlatform = useCallback(
+    (platform: TPlatform, enabled: boolean) => {
+      // In update mode, prevent toggling off the last platform for a display orientation
+      if (
+        disabledHorizontalUltraSwitcher === platform ||
+        disabledVerticalUltraSwitcher === platform
+      ) {
+        return enabledPlatformsRef.current.includes(platform);
+      }
+
+      // Only allow non-ultra users to have 2 platforms, or 1 platform and 1 custom destination enabled
+      if (!isPrime) {
+        return toggleNonUltraPlatform(platform, enabled);
+      }
+
+      if (enabled) {
+        enabledPlatformsRef.current.push(platform);
+      } else {
+        enabledPlatformsRef.current = enabledPlatformsRef.current.filter(p => p !== platform);
+      }
+
+      // Do not allow disabling the last platform
+      if (!enabledPlatformsRef.current.length) {
+        enabledPlatformsRef.current.push(platform);
+      }
+
+      emitSwitch();
+      return enabledPlatformsRef.current.includes(platform);
+    },
+    [emitSwitch, isPrime, disabledHorizontalUltraSwitcher, disabledVerticalUltraSwitcher],
+  );
+
+  const toggleNonUltraPlatform = useCallback(
+    (platform: TPlatform, enabled: boolean) => {
+      // TikTok and Facebook users can always go live with those platforms
+      let maxPlatforms = 2;
+
+      // Expand the maximum allowed platforms for TikTok and Facebook grandfathered users.
+      if (
+        enabled &&
+        isFacebookGrandfathered &&
+        (platform === 'facebook' || enabledPlatformsRef.current.includes('facebook'))
+      ) {
+        maxPlatforms++;
+      }
+
+      if (
+        enabled &&
+        isTikTokGrandfathered &&
+        (platform === 'tiktok' || enabledPlatformsRef.current.includes('tiktok'))
+      ) {
+        maxPlatforms++;
+      }
+
+      if (enabled) {
+        const total = enabledPlatformsRef.current.length + enabledDestRef.current.length;
+        if (total >= maxPlatforms) {
+          const text =
+            maxPlatforms > 2
+              ? $t(
+                  "You've reached the maximum number of streaming destinations. Upgrade to Ultra to enable multistreaming.",
+                )
+              : $t(
+                  "You've reached the maximum of 2 streaming destinations. Upgrade to Ultra to enable multistreaming.",
+                );
+
+          alertInfo({
+            name: 'switcher-info-alert',
+            text,
+          });
+          return false;
+        }
+        enabledPlatformsRef.current.push(platform);
+      } else {
+        enabledPlatformsRef.current = enabledPlatformsRef.current.filter(p => p !== platform);
+      }
+
+      if (!enabledPlatformsRef.current.length) {
+        enabledPlatformsRef.current.push(platform);
+      }
+
+      emitSwitch();
+
+      return enabledPlatformsRef.current.includes(platform);
+    },
+    [enabledPlatformsRef, emitSwitch, isFacebookGrandfathered, isTikTokGrandfathered],
+  );
+
+  const toggleDestination = useCallback(
+    (index: number, enabled: boolean) => {
+      // In dual output mode, only allow non-ultra users to have 2 platforms, or 1 platform and 1 custom destination enabled
+      if (!isPrime) {
+        return toggleNonUltraDestination(index, enabled);
+      }
+
+      enabledDestRef.current = enabledDestRef.current.filter((dest, i) => i !== index);
+
+      if (enabled) {
+        enabledDestRef.current.push(index);
+      }
+
+      emitSwitch(index, enabled);
+
+      return enabledDestRef.current.includes(index);
+    },
+    [emitSwitch, enabledDestRef, isPrime],
+  );
+
+  const toggleNonUltraDestination = useCallback(
+    (index: number, enabled: boolean) => {
+      if (enabled) {
+        const total = enabledPlatformsRef.current.length + enabledDestRef.current.length;
+        if (total >= 2) {
+          alertInfo({
+            name: 'switcher-info-alert',
+            text: $t(
+              "You've reached the maximum of 2 streaming destinations. Upgrade to Ultra to enable multistreaming.",
+            ),
+          });
+          return false;
+        }
+      }
+      enabledDestRef.current = enabledDestRef.current.filter(dest => dest !== index);
+      if (enabled) {
+        enabledDestRef.current.push(index);
+      }
+      emitSwitch(index, enabled);
+      return enabledDestRef.current.includes(index);
+    },
+    [enabledDestRef],
+  );
+
+  // Because the conditional logic for the Go Live window changes frequently, track the
+  // display selector visibility in a memoized value to make it easier to update
+  const showDisplaySelector = useMemo(() => {
+    if (isDualOutputMode) return true;
+    return false;
+  }, [isDualOutputMode]);
 
   return (
-    <div>
-      {linkedPlatforms.map(platform => (
-        <DestinationSwitcher
-          key={platform}
-          destination={platform}
-          enabled={isEnabled(platform)}
-          onChange={enabled => togglePlatform(platform, enabled)}
-          isPrimary={checkPrimaryPlatform(platform)}
-        />
-      ))}
-      {customDestinations?.map((dest, ind) => (
-        <DestinationSwitcher
-          key={ind}
-          destination={dest}
-          enabled={customDestinations[ind].enabled}
-          onChange={enabled => switchCustomDestination(ind, enabled)}
-        />
-      ))}
+    <div className={cx(styles.switchWrapper)}>
+      {renderedPlatforms.map((platform, ind) => {
+        const enabled = isEnabled(platform);
+        const disabledByBoth =
+          !!nonPrimeBothDisplayPlatform && !enabled && platform !== nonPrimeBothDisplayPlatform;
+        const switchDisabled =
+          p?.disabled || (!enabled && disableNonUltraSwitchers) || disabledByBoth;
+        const bothDisplayPlatformLabel = disabledByBoth
+          ? platformLabels(nonPrimeBothDisplayPlatform!)
+          : undefined;
+        const visible = enabled && showDisplaySelector;
+
+        return (
+          <DestinationSwitcher
+            key={platform}
+            destination={platform}
+            enabled={enabled}
+            togglePlatform={togglePlatform}
+            switchDisabled={switchDisabled}
+            bothDisplayPlatformLabel={bothDisplayPlatformLabel}
+            showDisplaySelector={visible}
+            showDisabledAlert={
+              disabledHorizontalUltraSwitcher === platform ||
+              disabledVerticalUltraSwitcher === platform
+            }
+            isPrime={isPrime}
+            username={getUsername(platform)}
+            index={ind}
+            isLoading={isLoading}
+          />
+        );
+      })}
+
+      {customDestinations?.map((dest, ind) => {
+        const disabledByBoth = !!nonPrimeBothDisplayPlatform && !dest.enabled;
+        const switchDisabled =
+          p?.disabled ||
+          disableCustomDestinationSwitchers ||
+          (!dest.enabled && disableNonUltraSwitchers) ||
+          disabledByBoth;
+        const bothDisplayPlatformLabel = disabledByBoth
+          ? platformLabels(nonPrimeBothDisplayPlatform!)
+          : undefined;
+        const visible = dest.enabled && showDisplaySelector;
+
+        return (
+          <DestinationSwitcher
+            key={ind}
+            destination={dest}
+            enabled={dest.enabled && !disableCustomDestinationSwitchers}
+            toggleDestination={toggleDestination}
+            switchDisabled={switchDisabled}
+            bothDisplayPlatformLabel={bothDisplayPlatformLabel}
+            showDisplaySelector={visible}
+            isPrime={isPrime}
+            index={ind}
+            isLoading={isLoading}
+          />
+        );
+      })}
     </div>
   );
-}
+});
 
 interface IDestinationSwitcherProps {
   destination: TPlatform | ICustomStreamDestination;
   enabled: boolean;
-  onChange: (enabled: boolean) => unknown;
-  isPrimary?: boolean;
+  togglePlatform?: (platform: TPlatform, enabled: boolean) => unknown;
+  toggleDestination?: (index: number, enabled: boolean) => unknown;
+  switchDisabled?: boolean;
+  bothDisplayPlatformLabel?: string;
+  index: number;
+  showDisplaySelector: boolean;
+  isPrime: boolean;
+  username?: string;
+  isUnlinked?: boolean;
+  showDisabledAlert?: boolean;
+  /** Disable the switch while the go live window is loading/refreshing settings */
+  isLoading?: boolean;
 }
 
 /**
  * Render a single switcher
  */
-function DestinationSwitcher(p: IDestinationSwitcherProps) {
-  const switchInputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const platform = typeof p.destination === 'string' ? (p.destination as TPlatform) : null;
-  const { RestreamService, MagicLinkService } = Services;
+// disable `func-call-spacing` and `no-spaced-func` rules
+// to pass back reference to addClass function
+// eslint-disable-next-line
+const DestinationSwitcher = memo(
+  forwardRef<ISwitcherCardHandle, IDestinationSwitcherProps>((p, ref) => {
+    const cardRef = useRef<ISwitcherCardHandle>(null);
 
-  function onClickHandler(ev: MouseEvent) {
-    if (p.isPrimary) {
-      alertAsync(
-        $t(
-          'You cannot disable the platform you used to sign in to Streamlabs Desktop. Please sign in with a different platform to disable streaming to this destination.',
-        ),
-      );
-      return;
-    }
-    if (RestreamService.views.canEnableRestream) {
-      const enable = !p.enabled;
-      p.onChange(enable);
-      // always proxy the click to the SwitchInput
-      // so it can play a transition animation
-      switchInputRef.current?.click();
-      // switch the container class without re-rendering to not stop the animation
-      if (enable) {
-        containerRef.current?.classList.remove(styles.platformDisabled);
+    useImperativeHandle(
+      ref,
+      () => ({
+        toggle: () => cardRef.current?.toggle(),
+        enable: () => cardRef.current?.enable(),
+        disable: () => cardRef.current?.disable(),
+      }),
+      [cardRef],
+    );
+
+    const platform = typeof p.destination === 'string' ? (p.destination as TPlatform) : null;
+    const disabled = p?.switchDisabled;
+    const label = platform
+      ? $t('Toggle %{platform}', { platform: platformLabels(platform) })
+      : $t('Toggle Destination');
+
+    const onChange = useCallback(
+      (enabled: boolean) => {
+        if (platform && p.togglePlatform) {
+          return p.togglePlatform(platform, enabled);
+        } else if (p.toggleDestination) {
+          return p.toggleDestination(p.index, enabled);
+        }
+      },
+      [platform, p.index, p.togglePlatform, p.toggleDestination],
+    );
+
+    const onClickHandler = useCallback(
+      (e: MouseEvent) => {
+        const enabled = p.enabled;
+
+        // Ignore toggles while the go live window is loading/refreshing settings
+        if (p.isLoading) return enabled;
+
+        if (!p.isPrime) {
+          if (p.bothDisplayPlatformLabel) {
+            alertInfo({
+              name: 'switcher-info-alert',
+              text: $t(
+                'Select a different display for %{platform} to toggle on another destination, or upgrade to Ultra to enable multistreaming.',
+                { platform: p.bothDisplayPlatformLabel },
+              ),
+            });
+            return enabled;
+          }
+
+          // Max-2 check is done inside togglePlatform/toggleDestination using current refs,
+          // so always pass through — the handler shows the message if needed.
+          return onChange(!enabled);
+        }
+
+        if (disabled || p.showDisabledAlert) {
+          if (p.showDisabledAlert) {
+            alertInfo({
+              name: 'switcher-info-alert',
+              text: $t('Cannot toggle off only enabled platform for this display orientation.'),
+            });
+          }
+          return enabled;
+        }
+        return onChange(!enabled);
+      },
+      [p.enabled, p.isLoading, onChange, p.bothDisplayPlatformLabel, disabled, p.showDisabledAlert],
+    );
+
+    const { title, description } = useMemo(() => {
+      if (platform) {
+        // define slots for a platform switcher
+        const service = getPlatformService(platform);
+        return {
+          title: service.displayName,
+          description: p.username ?? '',
+        };
       } else {
-        containerRef.current?.classList.add(styles.platformDisabled);
+        // define slots for a custom destination switcher
+        const destination = p.destination as ICustomStreamDestination;
+        return {
+          title: destination.name,
+          description: destination.url,
+        };
       }
-    } else {
-      MagicLinkService.actions.linkToPrime('slobs-multistream');
-    }
-  }
+    }, [platform, p.username, p.destination]);
 
-  const { title, description, Switch, Logo } = (() => {
-    if (platform) {
-      // define slots for a platform switcher
-      const { UserService } = Services;
-      const service = getPlatformService(platform);
-      const platformAuthData = UserService.state.auth?.platforms[platform];
-      assertIsDefined(platformAuthData);
-      return {
-        title: $t('Stream to %{platformName}', { platformName: service.displayName }),
-        description: platformAuthData.username,
-        Logo: () => (
-          <PlatformLogo platform={platform} className={styles[`platform-logo-${platform}`]} />
-        ),
-        Switch: () => (
-          <SwitchInput
-            inputRef={switchInputRef}
-            value={p.enabled}
-            name={platform}
-            disabled={p.isPrimary}
-            uncontrolled
+    // Memoize the icon as an element (not a component type) so PlatformLogo is
+    // reconciled as the same element across renders instead of being remounted
+    const icon = useMemo(() => {
+      if (platform) {
+        return (
+          <PlatformLogo
+            platform={platform}
+            className={cx(styles.platformLogo, styles[`platform-logo-${platform}`])}
           />
-        ),
-      };
-    } else {
-      // define slots for a custom destination switcher
-      const destination = p.destination as ICustomStreamDestination;
-      return {
-        title: destination.name,
-        description: destination.url,
-        Logo: () => <i className={cx(styles.destinationLogo, 'fa fa-globe')} />,
-        Switch: () => (
-          <SwitchInput
-            inputRef={switchInputRef}
-            value={destination.enabled}
-            name={`destination_${destination.name}`}
-            uncontrolled
+        );
+      }
+      return <i className={cx(styles.destinationLogo, 'fa fa-globe')} />;
+    }, [platform]);
+
+    const name = useMemo(() => {
+      if (platform) {
+        return platform;
+      }
+      if (p.destination && typeof p.destination !== 'string') {
+        return (p.destination as ICustomStreamDestination).name.replace(/\s+/g, '');
+      }
+      return `destination${p.index}`;
+    }, [platform, p.destination, p.index]);
+
+    return (
+      <SwitcherCard
+        ref={cardRef}
+        onClick={onClickHandler}
+        value={p.enabled}
+        switchClassName={platform ? 'platform-switch' : 'destination-switch'}
+        icon={icon}
+        name={name}
+        label={label}
+        title={title}
+        description={description}
+        switchDisabled={p.isLoading}
+        className={cx({ [styles.disabled]: disabled })}
+        tooltipClassName={styles.switcherTooltip}
+      >
+        {/* DISPLAY TOGGLES */}
+        <AnimatedWrapper
+          name="display-selector"
+          visible={p.showDisplaySelector}
+          className={styles.displaySelectorWrapper}
+          onClick={e => e.stopPropagation()}
+          height="35px"
+        >
+          <DisplaySelector
+            destinationName={!platform ? name : undefined}
+            title={title}
+            nolabel
+            className={styles.displaySelector}
+            platform={platform}
+            index={p.index}
+            alignIcons="left"
+            disabled={p.isLoading}
           />
-        ),
-      };
-    }
-  })();
-
-  return (
-    <div
-      ref={containerRef}
-      className={cx(styles.platformSwitcher, { [styles.platformDisabled]: !p.enabled })}
-      onClick={onClickHandler}
-    >
-      <div className={cx(styles.colInput)}>
-        <Switch />
-      </div>
-
-      {/* PLATFORM LOGO */}
-      <div className="logo margin-right--20">
-        <Logo />
-      </div>
-
-      {/* PLATFORM TITLE AND ACCOUNT/URL */}
-      <div className={styles.colAccount}>
-        <span className={styles.platformName}>{title}</span> <br />
-        {description} <br />
-      </div>
-    </div>
-  );
-}
+        </AnimatedWrapper>
+      </SwitcherCard>
+    );
+  }),
+);

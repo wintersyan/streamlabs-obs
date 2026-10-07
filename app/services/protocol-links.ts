@@ -6,8 +6,11 @@ import { NavigationService } from 'services/navigation';
 import { PlatformAppsService } from 'services/platform-apps';
 import { PlatformAppStoreService } from 'services/platform-app-store';
 import { UserService } from 'services/user';
-import { SettingsService } from './settings';
+import { SettingsService, TCategoryName } from './settings';
 import { byOS, OS } from 'util/operating-systems';
+import { GuestCamService } from './guest-cam';
+import { ENavMenuKey } from './nav-menu';
+import { Subject } from 'rxjs';
 
 function protocolHandler(base: string) {
   return (target: any, methodName: string, descriptor: PropertyDescriptor) => {
@@ -21,9 +24,14 @@ function protocolHandler(base: string) {
  * Describes a protocol link that was clicked
  */
 interface IProtocolLinkInfo {
+  url: string;
   base: string;
   path: string;
   query: URLSearchParams;
+}
+
+export interface IAppProtocolLink extends IProtocolLinkInfo {
+  appId: string;
 }
 
 export class ProtocolLinksService extends Service {
@@ -32,9 +40,12 @@ export class ProtocolLinksService extends Service {
   @Inject() platformAppStoreService: PlatformAppStoreService;
   @Inject() userService: UserService;
   @Inject() settingsService: SettingsService;
+  @Inject() guestCamService: GuestCamService;
 
   // Maps base URL components to handler function names
   private handlers: Dictionary<string>;
+
+  appProtocolLink = new Subject<IAppProtocolLink>();
 
   start(argv: string[]) {
     // Other instances started with a protocol link will receive this message
@@ -58,12 +69,15 @@ export class ProtocolLinksService extends Service {
   private handleLink(link: string) {
     const parsed = new url.URL(link);
     const info: IProtocolLinkInfo = {
+      url: link,
       base: parsed.host,
       path: parsed.pathname,
       query: parsed.searchParams,
     };
 
     if (this.handlers[info.base]) {
+      // TODO: index
+      // @ts-ignore
       this[this.handlers[info.base]](info);
     }
   }
@@ -71,24 +85,16 @@ export class ProtocolLinksService extends Service {
   @protocolHandler('library')
   private navigateLibrary(info: IProtocolLinkInfo) {
     if (!this.userService.isLoggedIn) return;
-
     const parts = info.path.match(/^\/(.+)\/(.+)$/);
+    const searchParams = new URLSearchParams(info.query);
+    // additional param to prompt the install confirm dialog on the overlay page
+    const install = searchParams?.get('install');
     if (parts) {
-      this.navigationService.navigate('BrowseOverlays', {
-        type: parts[1],
-        id: parts[2],
-      });
-    }
-  }
-
-  @protocolHandler('alertbox-library')
-  private navigateAlertboxLibrary(info: IProtocolLinkInfo) {
-    if (!this.userService.isLoggedIn) return;
-
-    const match = info.path.match(/^\/?([0-9]+)?\/?$/);
-
-    if (match) {
-      this.navigationService.navigate('AlertboxLibrary', { id: match[1] });
+      this.navigationService.navigate(
+        'BrowseOverlays',
+        { type: parts[1], id: parts[2], install },
+        ENavMenuKey.Themes,
+      );
     }
   }
 
@@ -103,12 +109,20 @@ export class ProtocolLinksService extends Service {
   private navigateApp(info: IProtocolLinkInfo) {
     if (!this.userService.isLoggedIn) return;
 
-    const appId = info.path.replace('/', '');
+    const match = info.path.match(/(\w+)\/?/);
+
+    if (!match) {
+      // Malformed app link
+      return;
+    }
+
+    const appId = match[1];
 
     if (this.platformAppsService.views.getApp(appId)) {
-      this.navigationService.navigate('PlatformAppMainPage', { appId });
+      this.navigationService.navigate('PlatformAppMainPage', { appId }, ENavMenuKey.AppStore);
+      this.appProtocolLink.next({ ...info, appId });
     } else {
-      this.navigationService.navigate('PlatformAppStore', { appId });
+      this.navigationService.navigate('PlatformAppStore', { appId }, ENavMenuKey.AppStore);
     }
   }
 
@@ -116,6 +130,16 @@ export class ProtocolLinksService extends Service {
   private openSettings(info: IProtocolLinkInfo) {
     const category = info.path.replace('/', '');
 
-    this.settingsService.showSettings(category);
+    this.settingsService.showSettings(category as TCategoryName);
+  }
+
+  @protocolHandler('join')
+  private guestCamJoin(info: IProtocolLinkInfo) {
+    const hash = info.path.replace('/', '');
+
+    this.guestCamService.joinAsGuest(hash).catch((e: unknown) => {
+      if ((e as { name?: string } | null)?.name === 'AbortError') return;
+      console.error('Failed to join guest cam session', e);
+    });
   }
 }

@@ -1,24 +1,40 @@
-import React, { MouseEvent, useEffect } from 'react';
+import React, { MouseEvent, useEffect, useMemo } from 'react';
 import moment, { Moment } from 'moment';
 import css from './StreamScheduler.m.less';
 import cx from 'classnames';
 import { Button, Calendar, Modal, Row, Col, Spin } from 'antd';
 import { YoutubeEditStreamInfo } from '../../windows/go-live/platforms/YoutubeEditStreamInfo';
 import { $t } from '../../../services/i18n';
-import FacebookEditStreamInfo from '../../windows/go-live/platforms/FacebookEditStreamInfo';
+import { FacebookEditStreamInfo } from '../../windows/go-live/platforms/FacebookEditStreamInfo';
+import { TwitterEditStreamInfo } from '../../windows/go-live/platforms/TwitterEditStreamInfo';
+import Badge from 'components-react/shared/DismissableBadge';
 import { ListInput, TimeInput } from '../../shared/inputs';
 import Form, { useForm } from '../../shared/inputs/Form';
 import { confirmAsync } from '../../modals';
-import { IStreamEvent, useStreamScheduler } from './useStreamScheduler';
-import { Services } from '../../service-provider';
-import { getDefined } from '../../../util/properties-type-guards';
+import {
+  IStreamEvent,
+  StreamSchedulerController,
+  StreamSchedulerCtx,
+  useStreamScheduler,
+} from './useStreamScheduler';
 import Scrollable from '../../shared/Scrollable';
+import { getDefined } from '../../../util/properties-type-guards';
+import { IFacebookStartStreamOptions } from 'services/platforms/facebook';
 
 /**
  * StreamScheduler page layout
  */
-export default function StreamScheduler() {
-  const { isEventsLoaded } = useStreamScheduler();
+export default function StreamSchedulerPage() {
+  const controller = useMemo(() => new StreamSchedulerController(), []);
+  return (
+    <StreamSchedulerCtx.Provider value={controller}>
+      <StreamScheduler />
+    </StreamSchedulerCtx.Provider>
+  );
+}
+function StreamScheduler() {
+  const { store } = useStreamScheduler();
+  const isEventsLoaded = store.useState(s => s.isEventsLoaded);
   return (
     <Scrollable className={cx(css.streamSchedulerPage)}>
       <Spin tip="Loading..." spinning={!isEventsLoaded}>
@@ -33,8 +49,11 @@ export default function StreamScheduler() {
  * Calendar component
  */
 function SchedulerCalendar() {
-  const { showEditEventModal, showNewEventModal, selectedPlatform, events } = useStreamScheduler();
-
+  const { showEditEventModal, showNewEventModal, store } = useStreamScheduler();
+  const { selectedPlatform, events } = store.useState(s => ({
+    selectedPlatform: s.selectedPlatform,
+    events: s.events,
+  }));
   /**
    * Renders a day cell in the calendar
    */
@@ -68,6 +87,7 @@ function SchedulerCalendar() {
           [css.event]: true,
           [css.eventFacebook]: event.platform === 'facebook',
           [css.eventYoutube]: event.platform === 'youtube',
+          [css.eventTwitter]: event.platform === 'twitter',
         })}
         onClick={ev => {
           ev.stopPropagation();
@@ -85,9 +105,9 @@ function SchedulerCalendar() {
    * So delegate the click event to the root div
    */
   function onCalendarClick(event: MouseEvent) {
-    const $td = event.target!['closest']('td');
+    const $td = (event.target as HTMLTableElement)!['closest']('td');
     if (!$td) return;
-    $td.querySelector('[data-role="day"]')!['click']();
+    ($td.querySelector('[data-role="day"]') as HTMLDivElement)!['click']();
   }
 
   // define the date boundaries
@@ -96,12 +116,14 @@ function SchedulerCalendar() {
 
   // replace the "DD" cells format to a "D" format
   useEffect(() => {
-    const $dayCells = document.querySelectorAll('.ant-picker-calendar-date-value');
-    $dayCells.forEach(($cell: HTMLElement) => ($cell.innerText = String(Number($cell.innerText))));
+    const $dayCells = document.querySelectorAll<HTMLElement>('.ant-picker-calendar-date-value');
+    $dayCells.forEach($cell => {
+      $cell.innerText = String(Number($cell.innerText));
+    });
   });
 
   return (
-    <div onClick={onCalendarClick}>
+    <div className={css.calendar} onClick={onCalendarClick}>
       <Calendar dateCellRender={dateCellRender} validRange={[minDate, maxDate]} />
     </div>
   );
@@ -112,22 +134,35 @@ function SchedulerCalendar() {
  */
 function EventSettingsModal() {
   const {
-    isUpdateMode,
-    time,
-    isModalVisible,
     submit,
     closeModal,
     setForm,
-    isLoading,
-    selectedPlatform,
-    platforms,
     getPlatformDisplayName,
     showNewEventModal,
     setTime,
+    updatePlatform,
+    platforms,
+    isUpdateMode,
+    store,
+  } = useStreamScheduler();
+
+  const {
+    time,
+    isModalVisible,
+    isLoading,
+    selectedPlatform,
     ytSettings,
     fbSettings,
-    updatePlatform,
-  } = useStreamScheduler();
+    twitterSettings,
+  } = store.useState(s => ({
+    time: s.time,
+    isModalVisible: s.isModalVisible,
+    isLoading: s.isLoading,
+    selectedPlatform: s.selectedPlatform,
+    ytSettings: s.platformSettings.youtube,
+    fbSettings: s.platformSettings.facebook,
+    twitterSettings: s.platformSettings.twitter,
+  }));
 
   // initialize the form
   const form = useForm();
@@ -150,7 +185,6 @@ function EventSettingsModal() {
       visible={isModalVisible}
       onOk={submit}
       onCancel={closeModal}
-      afterClose={closeModal}
       destroyOnClose={true}
       footer={<ModalButtons />}
       getContainer={`.${css.streamSchedulerPage}`}
@@ -159,16 +193,35 @@ function EventSettingsModal() {
         <Spin spinning={isLoading}>
           {/* PLATFORM SELECTOR */}
           {canChangePlatform && (
-            <ListInput
-              label={$t('Platform')}
-              name="platform"
-              value={selectedPlatform}
-              options={platforms.map(platform => ({
-                value: platform,
-                label: getPlatformDisplayName(platform),
-              }))}
-              onChange={platform => showNewEventModal(platform)}
-            />
+            <>
+              <ListInput
+                label={$t('Platform')}
+                name="platform"
+                value={selectedPlatform}
+                options={platforms.map(platform => ({
+                  value: platform,
+                  label: getPlatformDisplayName(platform),
+                }))}
+                onChange={platform => showNewEventModal(platform)}
+              />
+              {selectedPlatform === 'facebook' && (
+                <span className="whisper">
+                  {$t(
+                    'Please note that while you can schedule streams to Facebook, some will not appear on this calendar due to API limitations',
+                  )}
+                </span>
+              )}
+              {selectedPlatform === 'twitter' && (
+                <div className={css.betaNotice}>
+                  <Badge content={'Beta'} className={css.betaBadge} />
+                  <span className="whisper">
+                    {$t(
+                      'Scheduling streams to X is a new feature and may not always work as expected',
+                    )}
+                  </span>
+                </div>
+              )}
+            </>
           )}
 
           {/* TIME PICKER */}
@@ -180,7 +233,7 @@ function EventSettingsModal() {
               layoutMode="singlePlatform"
               isUpdateMode={isUpdateMode}
               isScheduleMode={true}
-              value={ytSettings}
+              value={getDefined(ytSettings)}
               onChange={newSettings => updatePlatform('youtube', newSettings)}
             />
           )}
@@ -191,8 +244,21 @@ function EventSettingsModal() {
               layoutMode="singlePlatform"
               isUpdateMode={isUpdateMode}
               isScheduleMode={true}
-              value={fbSettings}
-              onChange={newSettings => updatePlatform('facebook', newSettings)}
+              value={getDefined(fbSettings)}
+              onChange={(newSettings: IFacebookStartStreamOptions | undefined) =>
+                updatePlatform('facebook', newSettings)
+              }
+            />
+          )}
+
+          {/* X (TWITTER) SETTINGS */}
+          {selectedPlatform === 'twitter' && (
+            <TwitterEditStreamInfo
+              layoutMode="singlePlatform"
+              isUpdateMode={isUpdateMode}
+              isScheduleMode={true}
+              value={getDefined(twitterSettings)}
+              onChange={newSettings => updatePlatform('twitter', newSettings)}
             />
           )}
         </Spin>
@@ -205,14 +271,20 @@ function EventSettingsModal() {
  * Renders Schedule/Save/Delete buttons
  */
 function ModalButtons() {
+  const controller = useStreamScheduler();
   const {
     selectedEvent,
     remove,
     submit,
     goLive,
-    isLoading,
     primaryPlatform,
-  } = useStreamScheduler();
+    hideModal,
+    showModal,
+    store,
+  } = controller;
+  const { isLoading } = store.useState(s => ({
+    isLoading: s.isLoading,
+  }));
   const shouldShowSave = !!selectedEvent;
   const shouldShowSchedule = !selectedEvent;
   const shouldShowGoLive =
@@ -226,9 +298,16 @@ function ModalButtons() {
 
   /**
    * confirm and delete
+   * @remark The confirmation opens behind this modal, so hide this one for as long as the prompt is
+   * up and bring it back if the user decides against deleting. `remove` closes it for real.
    */
   async function onDeleteClick() {
-    if (await confirmAsync($t('Delete the event?'))) remove();
+    hideModal();
+    if (await confirmAsync($t('Delete the event?'))) {
+      remove();
+    } else {
+      showModal();
+    }
   }
 
   return (

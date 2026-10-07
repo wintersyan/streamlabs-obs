@@ -15,9 +15,26 @@ export enum EAvailableFeatures {
   restream = 'slobs--restream',
   tiktok = 'slobs--tiktok',
   highlighter = 'slobs--highlighter',
+  aiHighlighter = 'slobs--ai-highlighter',
+  highlighterMigration = 'slobs--highlighter-migration',
   growTab = 'slobs--grow-tab',
   themeAudit = 'slobs--theme-audit',
-  reactWidgets = 'slobs--react-widgets',
+  sharedStorage = 'slobs--shared-storage',
+  dualOutputRecording = 'slobs--dual-output-recording',
+  verticalRecording = 'slobs--vertical-recording',
+  streamShift = 'slobs--stream-shift',
+  twitchDualStream = 'slobs--twitch-dual-stream',
+  twitchDualStreamPreview = 'slobs--twitch-dual-stream-preview',
+  liveOutputEditing = 'slobs--live-output-editing',
+
+  /**
+   * There are two flags because one is used for beta access and
+   * grandfathering access, whereas the other is for production
+   * availability at launch.
+   */
+  guestCamBeta = 'slobs--guest-join',
+  guestCamProduction = 'slobs--guest-join-prod',
+  newChatBox = 'core--widgets-v2--chat-box',
 }
 
 interface IIncrementalRolloutServiceState {
@@ -34,7 +51,21 @@ export class IncrementalRolloutService extends StatefulService<IIncrementalRollo
     availableFeatures: [],
   };
 
+  /**
+   * Available features are fetched async.  This is normally not a problem,
+   * as they are reactive.  However, any service logic that happens during
+   * initialization probably needs to wait on this promise before accessing
+   * the list of available features.
+   */
+  featuresReady: Promise<void>;
+
+  private featuresReadyResolve: () => void;
+
   init() {
+    this.featuresReady = new Promise(resolve => {
+      this.featuresReadyResolve = resolve;
+    });
+
     this.setCommandLineFeatures();
 
     this.userService.userLogin.subscribe(() => this.fetchAvailableFeatures());
@@ -59,6 +90,7 @@ export class IncrementalRolloutService extends StatefulService<IIncrementalRollo
 
       return jfetch<{ features: string[] }>(request).then(response => {
         this.SET_AVAILABLE_FEATURES([...this.state.availableFeatures, ...response.features]);
+        this.featuresReadyResolve();
       });
     }
   }

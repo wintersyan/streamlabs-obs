@@ -6,12 +6,14 @@ import { ISceneNodeModel, SceneNode } from './scene-node';
 import { Selection } from './selection';
 import Utils from '../../../utils';
 import { ServiceHelper } from '../../../core';
+import { TDisplayType } from 'services/settings-v2';
 
 /**
  * Serialized representation of {@link SceneItemFolder}.
  */
 export interface ISceneItemFolderModel extends ISceneNodeModel {
   name: string;
+  display?: TDisplayType;
 }
 
 /**
@@ -20,16 +22,18 @@ export interface ISceneItemFolderModel extends ISceneNodeModel {
  * other nodes based on this folder. For further scene item folder operations
  * see {@link SceneNode}, {@link Scene} and {@link SourcesService}.
  */
-@ServiceHelper()
+@ServiceHelper('ScenesService')
 export class SceneItemFolder extends SceneNode implements ISceneItemFolderModel {
   @Fallback() private sceneFolder: InternalSceneItemFolder;
   @InjectFromExternalApi() private sourcesService: SourcesService;
 
   name: string;
+  display?: TDisplayType;
 
   constructor(public sceneId: string, public nodeId: string) {
     super(sceneId, nodeId);
     this.sceneFolder = this.internalScenesService.views.getScene(sceneId).getFolder(this.nodeId);
+    this.display = this.sceneFolder.display;
     Utils.applyProxy(this, () => this.getModel());
   }
 

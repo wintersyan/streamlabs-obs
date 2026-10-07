@@ -56,16 +56,18 @@ export class MediaShareService extends WidgetSettingsService<IMediaShareData> {
   static initialState = WIDGET_INITIAL_STATE;
 
   getApiSettings() {
+    const host = this.getHost();
     return {
       type: WidgetType.MediaShare,
-      url: WidgetDefinitions[WidgetType.MediaShare].url(this.getHost(), this.getWidgetToken()),
-      previewUrl: `https://${this.getHost()}/widgets/media/v1/${this.getWidgetToken()}`,
+      url: WidgetDefinitions[WidgetType.MediaShare].url(host, this.getWidgetToken()),
+      previewUrl: `https://${host}/widgets/media/v1/${this.getWidgetToken()}`,
+      webSettingsUrl: `https://${host}/dashboard#/widgets/mediashare`,
       settingsUpdateEvent: 'mediaSharingSettingsUpdate',
       goalCreateEvent: 'newmediaShare',
       goalResetEvent: 'mediaShareEnd',
-      dataFetchUrl: `https://${this.getHost()}/api/v5/slobs/widget/media`,
-      settingsSaveUrl: `https://${this.getHost()}/api/v5/slobs/widget/media`,
-      testers: ['Follow', 'Subscription', 'Donation', 'Bits', 'Host'],
+      dataFetchUrl: `https://${host}/api/v5/slobs/widget/media`,
+      settingsSaveUrl: `https://${host}/api/v5/slobs/widget/media`,
+      testers: ['Follow', 'Subscription', 'Donation', 'Bits'],
       customCodeAllowed: false,
       customFieldsAllowed: false,
     };
@@ -76,8 +78,7 @@ export class MediaShareService extends WidgetSettingsService<IMediaShareData> {
       pricePerSecond: {
         title: $t('Price Per Second'),
         tooltip: $t(
-          'In order to control length, you can decide how much it costs per second to share media. Setting this to 0.30' +
-            ' would mean that for $10, media would play for 30 seconds. The default value is 0.10.',
+          'In order to control length, you can decide how much it costs per second to share media. Setting this to 0.30 would mean that for $10, media would play for 30 seconds. The default value is 0.10.',
         ),
       },
       minAmount: {
@@ -89,8 +90,7 @@ export class MediaShareService extends WidgetSettingsService<IMediaShareData> {
       maxDuration: {
         title: $t('Max Duration'),
         tooltip: $t(
-          'The maximum duration in seconds that media can be played, regardless of amount donated.' +
-            ' The default value is 60 seconds.',
+          'The maximum duration in seconds that media can be played, regardless of amount donated. The default value is 60 seconds.',
         ),
         isInteger: true,
       },

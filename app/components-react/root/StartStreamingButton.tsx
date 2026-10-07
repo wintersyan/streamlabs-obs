@@ -1,29 +1,62 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
 import cx from 'classnames';
 import { EStreamingState } from 'services/streaming';
 import { EGlobalSyncStatus } from 'services/media-backup';
-import electron from 'electron';
 import { $t } from 'services/i18n';
-import { useVuex } from '../hooks';
+import { useDebounce, useVuex } from '../hooks';
 import { Services } from '../service-provider';
+import * as remote from '@electron/remote';
+import { TStreamShiftStatus } from 'services/restream';
+import { promptAction } from 'components-react/modals';
+import { TSocketEvent } from 'services/websocket';
+import { useRealmObject } from 'components-react/hooks/realm';
+import debounce from 'lodash/debounce';
 
-export default function StartStreamingButton(p: { disabled?: boolean }) {
+function StartStreamingButton(p: { disabled?: boolean }) {
   const {
     StreamingService,
     StreamSettingsService,
+    SettingsService,
     UserService,
     CustomizationService,
     MediaBackupService,
     SourcesService,
+    RestreamService,
   } = Services;
 
-  const { streamingStatus, delayEnabled, delaySeconds } = useVuex(() => ({
-    streamingStatus: StreamingService.state.streamingStatus,
-    delayEnabled: StreamingService.views.delayEnabled,
-    delaySeconds: StreamingService.views.delaySeconds,
-  }));
+  const {
+    streamingStatus,
+    delayEnabled,
+    delaySeconds,
+    streamShiftStatus,
+    isDualOutputMode,
+    isLoggedIn,
+    isPrime,
+    primaryPlatform,
+    isMultiplatformMode,
+    isTwitchUnprotectedStream,
+    protectedModeEnabled,
+  } = useVuex(
+    () => ({
+      streamingStatus: StreamingService.views.streamingStatus,
+      delayEnabled: StreamingService.views.delayEnabled,
+      delaySeconds: StreamingService.views.delaySeconds,
+      streamShiftStatus: RestreamService.state.streamShiftStatus,
+      isDualOutputMode: StreamingService.views.isDualOutputMode,
+      isLoggedIn: UserService.isLoggedIn,
+      isPrime: UserService.state.isPrime,
+      primaryPlatform: UserService.state.auth?.primaryPlatform,
+      isMultiplatformMode: StreamingService.views.isMultiplatformMode,
+      isTwitchUnprotectedStream: StreamingService.views.isTwitchUnprotectedStream,
+      protectedModeEnabled: StreamingService.views.protectedModeEnabled,
+    }),
+    false,
+  );
+
+  const updateStreamInfoOnLive = useRealmObject(CustomizationService.state).updateStreamInfoOnLive;
 
   const [delaySecondsRemaining, setDelayTick] = useState(delaySeconds);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     setDelayTick(delaySeconds);
@@ -44,13 +77,59 @@ export default function StartStreamingButton(p: { disabled?: boolean }) {
     }
   }, [delaySecondsRemaining, streamingStatus, delayEnabled]);
 
-  async function toggleStreaming() {
+  // Do not use useSubscription here because the cleanup needs both cancel toggling and unsubscribe from the event
+  useEffect(() => {
+    // Check for stream shift status on mount. This will happen on app launch because the main window is always active
+    if (isPrime && streamingStatus === EStreamingState.Offline) {
+      checkIsLive();
+    }
+
+    const streamShiftEvent = StreamingService.streamShiftEvent.subscribe(
+      async (event: TSocketEvent) => {
+        // Notify the user
+        const message = await RestreamService.actions.return.handleStreamShiftEvent(event);
+
+        // An empty message means the handler declined to notify (e.g. a forced go live),
+        // so don't show an alert with an empty body
+        if (event.type === 'switchActionComplete' && message) {
+          promptAction({
+            title: $t('Stream successfully switched'),
+            message,
+            btnText: $t('Close'),
+            btnType: 'default',
+            cancelBtnPosition: 'none',
+          });
+        }
+      },
+    );
+
+    return () => {
+      toggleStreaming.cancel();
+      checkIsLive.cancel();
+      streamShiftEvent.unsubscribe();
+    };
+  }, []);
+
+  const handleToggleStreaming = useCallback(async () => {
     if (StreamingService.isStreaming) {
       StreamingService.toggleStreaming();
     } else {
+      // OBS does not refuse a blank stream key, so an unprotected stream would go live without one.
+      // Validate that the stream key exists in unprotected mode.
+      if (!protectedModeEnabled && !SettingsService.views.values.Stream.key) {
+        await remote.dialog.showMessageBox(remote.getCurrentWindow(), {
+          title: $t('Streaming Error'),
+          type: 'error',
+          message: $t('The stream key is missing. Please configure your streaming settings.'),
+          buttons: [$t('OK')],
+        });
+        return;
+      }
+
+      // Check if the scene collection has completed loading and syncing
       if (MediaBackupService.views.globalSyncStatus === EGlobalSyncStatus.Syncing) {
-        const goLive = await electron.remote.dialog
-          .showMessageBox(electron.remote.getCurrentWindow(), {
+        const goLive = await remote.dialog
+          .showMessageBox(remote.getCurrentWindow(), {
             title: $t('Cloud Backup'),
             type: 'warning',
             message:
@@ -69,8 +148,8 @@ export default function StartStreamingButton(p: { disabled?: boolean }) {
           .length === 0;
 
       if (needToShowNoSourcesWarning) {
-        const goLive = await electron.remote.dialog
-          .showMessageBox(electron.remote.getCurrentWindow(), {
+        const goLive = await remote.dialog
+          .showMessageBox(remote.getCurrentWindow(), {
             title: $t('No Sources'),
             type: 'warning',
             message:
@@ -98,47 +177,80 @@ export default function StartStreamingButton(p: { disabled?: boolean }) {
         StreamingService.actions.goLive();
       }
     }
-  }
+  }, [
+    streamingStatus,
+    streamShiftStatus,
+    isDualOutputMode,
+    isLoggedIn,
+    isPrime,
+    primaryPlatform,
+    isMultiplatformMode,
+    updateStreamInfoOnLive,
+    isTwitchUnprotectedStream,
+  ]);
 
-  const getIsRedButton = streamingStatus !== EStreamingState.Offline;
+  // Wrap the toggleStreaming function in a debounce to prevent multiple rapid clicks
+  // and also to cancel the action on unmount to prevent memory leaks and state updates on unmounted components
+  // Don't use the useDebounce hook here to maintain stateful callbacks
+  const toggleStreaming = useMemo(() => debounce(handleToggleStreaming, 500), [
+    handleToggleStreaming,
+  ]);
 
-  const isDisabled =
-    p.disabled ||
-    (streamingStatus === EStreamingState.Starting && delaySecondsRemaining === 0) ||
-    (streamingStatus === EStreamingState.Ending && delaySecondsRemaining === 0);
+  // Debounce checking for the live status of the stream and enable canceling on unmount
+  const checkIsLive = useDebounce(0, RestreamService.actions.checkIsLive);
 
-  function shouldShowGoLiveWindow() {
+  const getIsRedButton = useMemo(() => {
+    return streamingStatus !== EStreamingState.Offline && streamShiftStatus !== 'pending';
+  }, [streamingStatus, streamShiftStatus]);
+
+  const isDisabled = useMemo(() => {
+    return (
+      p.disabled ||
+      (streamingStatus === EStreamingState.Starting && delaySecondsRemaining === 0) ||
+      (streamingStatus === EStreamingState.Ending && delaySecondsRemaining === 0)
+    );
+  }, [p.disabled, streamingStatus, delaySecondsRemaining]);
+
+  const shouldShowGoLiveWindow = useCallback(() => {
     if (!UserService.isLoggedIn) return false;
     const primaryPlatform = UserService.state.auth?.primaryPlatform;
     const updateStreamInfoOnLive = CustomizationService.state.updateStreamInfoOnLive;
 
+    if (!primaryPlatform) return false;
+
+    // In unprotected mode, only a Twitch ingest url can show the Go Live window. This is for legacy reasons.
+    if (!StreamSettingsService.state.protectedModeEnabled) {
+      return isTwitchUnprotectedStream && updateStreamInfoOnLive;
+    }
+
+    if (streamShiftStatus === 'pending') {
+      return true;
+    }
+
+    if (StreamingService.views.isDualOutputMode) {
+      return true;
+    }
+
+    if (
+      !!UserService.state.auth?.platforms &&
+      isMultiplatformMode &&
+      Object.keys(UserService.state.auth?.platforms).length > 1
+    ) {
+      return true;
+    }
+
     if (primaryPlatform === 'twitch') {
-      // For Twitch, we can show the Go Live window even with protected mode off
-      // This is mainly for legacy reasons.
-      return StreamingService.views.isMultiplatformMode || updateStreamInfoOnLive;
+      return isMultiplatformMode || updateStreamInfoOnLive;
+    } else {
+      return StreamSettingsService.isSafeToModifyStreamKey();
     }
-
-    if (primaryPlatform === 'facebook') {
-      return (
-        StreamSettingsService.state.protectedModeEnabled &&
-        StreamSettingsService.isSafeToModifyStreamKey()
-      );
-    }
-
-    if (primaryPlatform === 'youtube') {
-      return (
-        StreamSettingsService.state.protectedModeEnabled &&
-        StreamSettingsService.isSafeToModifyStreamKey()
-      );
-    }
-
-    if (primaryPlatform === 'tiktok') {
-      return (
-        StreamSettingsService.state.protectedModeEnabled &&
-        StreamSettingsService.isSafeToModifyStreamKey()
-      );
-    }
-  }
+  }, [
+    primaryPlatform,
+    isMultiplatformMode,
+    updateStreamInfoOnLive,
+    streamShiftStatus,
+    isTwitchUnprotectedStream,
+  ]);
 
   return (
     <button
@@ -146,44 +258,51 @@ export default function StartStreamingButton(p: { disabled?: boolean }) {
       className={cx('button button--action', { 'button--soft-warning': getIsRedButton })}
       disabled={isDisabled}
       onClick={toggleStreaming}
+      data-name="StartStreamingButton"
     >
-      <StreamButtonLabel
-        streamingStatus={streamingStatus}
-        delayEnabled={delayEnabled}
-        delaySecondsRemaining={delaySecondsRemaining}
-      />
+      {isLoading ? (
+        <i className="fa fa-spinner fa-pulse" />
+      ) : (
+        <StreamButtonLabel
+          delaySecondsRemaining={delaySecondsRemaining}
+          streamingStatus={streamingStatus}
+          delayEnabled={delayEnabled}
+          streamShiftStatus={streamShiftStatus}
+        />
+      )}
     </button>
   );
 }
 
-function StreamButtonLabel(p: {
-  streamingStatus: EStreamingState;
+type TStreamButtonLabelProps = {
   delaySecondsRemaining: number;
+  streamingStatus: EStreamingState;
   delayEnabled: boolean;
-}) {
-  if (p.streamingStatus === EStreamingState.Live) {
-    return <>{$t('End Stream')}</>;
-  }
+  streamShiftStatus: TStreamShiftStatus;
+};
 
-  if (p.streamingStatus === EStreamingState.Starting) {
-    if (p.delayEnabled) {
-      return <>{`Starting ${p.delaySecondsRemaining}s`}</>;
+const StreamButtonLabel = memo((p: TStreamButtonLabelProps) => {
+  const label = useMemo(() => {
+    if (p.streamShiftStatus === 'pending') {
+      return $t('Claim Stream');
     }
 
-    return <>{$t('Starting')}</>;
-  }
-
-  if (p.streamingStatus === EStreamingState.Ending) {
-    if (p.delayEnabled) {
-      return <>{`Discard ${p.delaySecondsRemaining}s`}</>;
+    switch (p.streamingStatus) {
+      case EStreamingState.Live:
+        return $t('End Stream');
+      case EStreamingState.Starting:
+        return p.delayEnabled ? `Starting ${p.delaySecondsRemaining}s` : $t('Starting');
+      case EStreamingState.Ending:
+        return p.delayEnabled ? `Discard ${p.delaySecondsRemaining}s` : $t('Ending');
+      case EStreamingState.Reconnecting:
+        return $t('Reconnecting');
+      case EStreamingState.Offline:
+      default:
+        return $t('Go Live');
     }
+  }, [p.streamShiftStatus, p.streamingStatus, p.delayEnabled, p.delaySecondsRemaining]);
 
-    return <>{$t('Ending')}</>;
-  }
+  return <>{label}</>;
+});
 
-  if (p.streamingStatus === EStreamingState.Reconnecting) {
-    return <>{$t('Reconnecting')}</>;
-  }
-
-  return <>{$t('Go Live')}</>;
-}
+export default memo(StartStreamingButton);

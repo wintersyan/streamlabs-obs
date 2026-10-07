@@ -1,14 +1,13 @@
 <template>
-  <modal-layout v-if="widget.previewSourceId">
+  <modal-layout v-if="widget.previewSourceId" ref="modal" :show-controls="false" :custom-controls="true">
     <div class="container" slot="content">
       <div class="top-settings" v-if="properties">
         <generic-form :value="topProperties" @input="onPropsInputHandler" />
 
-        <div class="ant-alert ant-alert-info" role="alert" v-if="shouldShowAlertboxSwitcher">
+        <div class="ant-alert ant-alert-info" role="alert" v-if="props.isAlertBox">
           <div class="ant-alert-content">
             <div
               class="ant-alert-message"
-              v-if="props.isAlertBox"
               style="cursor: pointer"
               @click="switchToNewAlertboxUI()"
             >
@@ -17,7 +16,7 @@
           </div>
         </div>
         <div v-if="apiSettings.testers" class="button button--action test-button">
-          <test-widgets :componentProps="{ testers: apiSettings.testers }" />
+          <test-widgets />
         </div>
       </div>
 
@@ -48,7 +47,7 @@
         >
           <div class="display">
             <display
-              v-if="!animating && !hideStyleBlockers"
+              v-if="!animating"
               :componentProps="{
                 sourceId: widget.previewSourceId,
                 clickHandler: e => createProjector(e),
@@ -154,6 +153,20 @@
         /></scrollable>
       </div>
     </div>
+    <div class="widget-controls" slot="controls">
+      <div class="widget-controls__extra">
+        <button class="button button--trans button--ghost" @click="openWebSettings()">
+          <i class="icon-pop-out-2" />
+          {{ $t('Manage on Web') }}
+        </button>
+      </div>
+      <button class="button button--default" @click="$refs.modal.cancel()">
+        {{ $t('Cancel') }}
+      </button>
+      <button class="button button--action" @click="$refs.modal.done()">
+        {{ $t('Done') }}
+      </button>
+    </div>
   </modal-layout>
 </template>
 
@@ -199,7 +212,25 @@
 }
 
 .test-button .link {
-  color: var(--white);
+  color: var(--action-button-text);
+}
+
+.widget-controls {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+
+  &__extra {
+    flex: 1;
+    text-align: left;
+  }
+
+  .button--ghost {
+    border-color: var(--paragraph);
+  }
 }
 </style>
 

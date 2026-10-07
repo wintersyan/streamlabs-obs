@@ -1,76 +1,76 @@
 import React from 'react';
-import { useOnCreate } from '../../hooks';
+import { useOnCreate } from 'slap';
 import { ModalLayout } from '../../shared/ModalLayout';
 import { Services } from '../../service-provider';
 import { AlertBox } from '../AlertBox';
 import { AlertBoxModule } from '../useAlertBox';
-import { useWidgetRoot } from './useWidget';
-import { getDefined } from '../../../util/properties-type-guards';
+import { useWidgetRoot, WidgetModule } from './useWidget';
 // TODO: import other widgets here to avoid merge conflicts
-// BitGoal
-// DonationGoal
-// CharityGoal
-// FollowerGoal
-// StarsGoal
-// SubGoal
-// SubscriberGoal
-// ChatBox
+import { GenericGoal, GenericGoalModule } from '../GenericGoal';
+import { ChatBox, ChatBoxModule } from '../ChatBox';
 // ChatHighlight
-// Credits
-// DonationTicker
-// EmoteWall
-// EventList
+import { Credits, CreditsModule } from '../Credits';
+import { DonationTicker, DonationTickerModule } from '../DonationTicker';
+import { EmoteWall, EmoteWallModule } from '../EmoteWall';
+import { EventList, EventListModule } from '../EventList';
 // MediaShare
 // Poll
-// SpinWheel
-// SponsorBanner
-// StreamBoss
-// TipJar
+import { SpinWheel, SpinWheelModule } from '../SpinWheel';
+import { SponsorBanner, SponsorBannerModule } from '../SponsorBanner';
+import { StreamBoss, StreamBossModule } from '../StreamBoss';
+import { Jar, JarModule } from '../Jar';
 import { ViewerCount, ViewerCountModule } from '../ViewerCount';
+import { CustomWidget, CustomWidgetModule } from '../CustomWidget';
+import { GamePulseWidget } from 'components-react/widgets/GamePulse';
+import { GamePulseModule } from 'components-react/widgets/game-pulse/useGamePulseWidget';
 import { useSubscription } from '../../hooks/useSubscription';
+import { useChildWindowParams } from 'components-react/hooks';
 
 // define list of Widget components and modules
 export const components = {
   AlertBox: [AlertBox, AlertBoxModule],
-  // TODO: define other widgets here to avoid merge conflicts
-  // BitGoal
-  // DonationGoal
-  // CharityGoal
-  // FollowerGoal
-  // StarsGoal
-  // SubGoal
-  // SubscriberGoal
-  // ChatBox
+  BitGoal: [GenericGoal, GenericGoalModule],
+  DonationGoal: [GenericGoal, GenericGoalModule],
+  CharityGoal: [GenericGoal, GenericGoalModule],
+  FollowerGoal: [GenericGoal, GenericGoalModule],
+  SubGoal: [GenericGoal, GenericGoalModule],
+  SubscriberGoal: [GenericGoal, GenericGoalModule],
+  SuperchatGoal: [GenericGoal, GenericGoalModule],
+  ChatBox: [ChatBox, ChatBoxModule],
   // ChatHighlight
-  // Credits
-  // DonationTicker
-  // EmoteWall
-  // EventList
+  Credits: [Credits, CreditsModule],
+  DonationTicker: [DonationTicker, DonationTickerModule],
+  EmoteWall: [EmoteWall, EmoteWallModule],
+  EventList: [EventList, EventListModule],
   // MediaShare
   // Poll
-  // SpinWheel
-  // SponsorBanner
-  // StreamBoss
-  // TipJar
+  SpinWheel: [SpinWheel, SpinWheelModule],
+  SponsorBanner: [SponsorBanner, SponsorBannerModule],
+  StreamBoss: [StreamBoss, StreamBossModule],
+  TipJar: [Jar, JarModule],
   ViewerCount: [ViewerCount, ViewerCountModule],
+  CustomWidget: [CustomWidget, CustomWidgetModule],
+  GamePulseWidget: [GamePulseWidget, GamePulseModule],
 };
 
 /**
  * Renders a widget window by given sourceId from window's query params
  */
 export function WidgetWindow() {
-  const { WindowsService, WidgetsService } = Services;
+  const { WidgetsService } = Services;
+  const { sourceId, widgetType } = useChildWindowParams();
 
   // take the source id and widget's component from the window's params
-  const { sourceId, WidgetModule, WidgetSettingsComponent } = useOnCreate(() => {
-    const { sourceId, widgetType } = WindowsService.getChildWindowQueryParams();
-    const [WidgetSettingsComponent, WidgetModule] = components[widgetType];
-    return { sourceId, WidgetModule, WidgetSettingsComponent };
+  const { Module, WidgetSettingsComponent } = useOnCreate(() => {
+    // TODO: index
+    // @ts-ignore
+    const [WidgetSettingsComponent, Module] = components[widgetType];
+    return { sourceId, Module, WidgetSettingsComponent };
   });
 
   // initialize the Redux module for the widget
   // so all children components can use it via `useWidget()` call
-  const { reload } = useWidgetRoot(WidgetModule, { sourceId });
+  const { reload } = useWidgetRoot(Module as typeof WidgetModule, { sourceId });
 
   useSubscription(WidgetsService.settingsInvalidated, reload);
 

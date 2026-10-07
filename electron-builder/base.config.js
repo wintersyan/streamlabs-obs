@@ -1,4 +1,8 @@
 const signtool = require('signtool');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const cp = require('child_process');
 
 const base = {
   appId: 'com.streamlabs.slobs',
@@ -10,6 +14,7 @@ const base = {
     'node_modules',
     'vendor',
     'app/i18n',
+    'app/util/shutdown-coordinator.js',
     'media/images/game-capture',
     'updater/build/bootstrap.js',
     'updater/build/bundle-updater.js',
@@ -26,10 +31,12 @@ const base = {
   nsis: {
     license: 'AGREEMENT',
     oneClick: false,
+    warningsAsErrors: false,
     perMachine: true,
     allowToChangeInstallationDirectory: true,
     include: 'installer.nsh',
   },
+  asarUnpack : ["**/node-libuiohook/**", "**/node-fontinfo/**", "**/font-manager/**", "**/game_overlay/**","**/color-picker/**"],
   publish: {
     provider: 'generic',
     url: 'https://slobs-cdn.streamlabs.com',
@@ -37,12 +44,10 @@ const base = {
   win: {
     executableName: 'Streamlabs OBS',
     extraFiles: ['LICENSE', 'AGREEMENT', 'shared-resources/**/*', '!shared-resources/README'],
-    extraResources: [
-      'node_modules/ffmpeg-ffprobe-static/ffmpeg.exe',
-      'node_modules/ffmpeg-ffprobe-static/ffprobe.exe',
-    ],
     rfc3161TimeStampServer: 'http://timestamp.digicert.com',
     timeStampServer: 'http://timestamp.digicert.com',
+    signDlls: true,
+    signingHashAlgorithms: ['sha256'],
     async sign(config) {
       if (process.env.SLOBS_NO_SIGN) return;
 
@@ -54,17 +59,20 @@ const base = {
       }
 
       console.log(`Signing ${config.hash} ${config.path}`);
-      await signtool.sign(config.path, {
-        subject: 'Streamlabs (General Workings, Inc.)',
-        rfcTimestamp: 'http://timestamp.digicert.com',
-        algorithm: config.hash,
-        append: config.isNest,
-        description: config.name,
-        url: config.site,
-      });
+
+      const signingPath = path.join(os.tmpdir(), 'sldesktopsigning');
+
+      if (fs.existsSync(signingPath)) {
+        fs.appendFileSync(signingPath, `${config.path}\n`);
+      } else {
+        cp.execSync(`logisign client --client logitech-cpg-sign-client --app streamlabs --files "${config.path}"`, { stdio: 'inherit' });
+      }
     },
   },
   mac: {
+    identity: process.env.SLOBS_NO_SIGN
+      ? null
+      : process.env.APPLE_SLD_IDENTITY || 'Streamlabs LLC (UT675MBB9Q)',
     extraFiles: [
       'shared-resources/**/*',
       '!shared-resources/README',
@@ -79,15 +87,13 @@ const base = {
       //   "filter": ["**/*"]
       // }
     ],
-    extraResources: [
-      'node_modules/ffmpeg-ffprobe-static/ffmpeg',
-      'node_modules/ffmpeg-ffprobe-static/ffprobe',
-    ],
     icon: 'media/images/icon-mac.icns',
     hardenedRuntime: true,
     entitlements: 'electron-builder/entitlements.plist',
     entitlementsInherit: 'electron-builder/entitlements.plist',
     extendInfo: {
+      NSAppleEventsUsageDescription: 'Allow Streamlabs Desktop to run Apple scripts.',
+      NSAppleScriptEnabled: 'YES',
       CFBundleURLTypes: [
         {
           CFBundleURLName: 'Streamlabs OBS Link',
@@ -98,25 +104,29 @@ const base = {
   },
   dmg: {
     background: 'media/images/dmg-bg.png',
-    iconSize: 100,
+    iconSize: 85,
     contents: [
       {
-        x: 112,
-        y: 165,
+        x: 130,
+        y: 208,
       },
       {
         type: 'link',
         path: '/Applications',
-        x: 396,
-        y: 165,
+        x: 380,
+        y: 208,
       },
     ],
   },
   extraMetadata: {
     env: 'production',
+    sentryFrontendDSN: process.env.SLD_SENTRY_FRONTEND_DSN,
+    sentryBackendClientURL: process.env.SLD_SENTRY_BACKEND_CLIENT_URL,
+    sentryBackendClientPreviewURL: process.env.SLD_SENTRY_BACKEND_CLIENT_PREVIEW_URL,
   },
+  beforePack: './electron-builder/beforePack.js',
   afterPack: './electron-builder/afterPack.js',
-  afterSign: './electron-builder/notarize.js',
+  afterSign: './electron-builder/afterSign.js',
 };
 
 module.exports = base;

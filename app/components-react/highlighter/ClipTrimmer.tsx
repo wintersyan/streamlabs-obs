@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState, RefObject } from 'react';
-import { IClip } from 'services/highlighter';
-import { SCRUB_FRAMES, SCRUB_HEIGHT, SCRUB_WIDTH } from 'services/highlighter/constants';
+import { TClip } from 'services/highlighter/models/highlighter.models';
+import {
+  SCRUB_FRAMES,
+  SCRUB_HEIGHT,
+  SCRUB_WIDTH,
+  SCRUB_WIDTH_VERTICAL,
+} from 'services/highlighter/constants';
 import { Services } from 'components-react/service-provider';
 import times from 'lodash/times';
 import styles from './ClipTrimmer.m.less';
@@ -27,7 +32,7 @@ function useStateRef<T>(initialValue: T): [RefObject<T>, (newValue: T) => void] 
   ];
 }
 
-export default function ClipTrimmer(props: { clip: IClip }) {
+export default function ClipTrimmer(props: { clip: TClip; streamId: string | undefined }) {
   const { HighlighterService, UsageStatisticsService } = Services;
   const videoRef = useRef<HTMLVideoElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -44,6 +49,7 @@ export default function ClipTrimmer(props: { clip: IClip }) {
   const [isPlaying, setIsPlaying] = useStateRef(false);
 
   const endTime = props.clip.duration! - localEndTrim;
+  const width = props.clip?.display === 'vertical' ? SCRUB_WIDTH_VERTICAL : SCRUB_WIDTH;
 
   function playAt(t: number) {
     if (!videoRef.current) return;
@@ -110,7 +116,7 @@ export default function ClipTrimmer(props: { clip: IClip }) {
     } else {
       isScrubbing.current = false;
       const timelineWidth = timelineRef.current!.offsetWidth - 40;
-      const timelineOffset = timelineRef.current!.getBoundingClientRect().left;
+      const timelineOffset = timelineRef.current!.getBoundingClientRect().left + 20;
       playAt(((e.clientX - timelineOffset) / timelineWidth) * props.clip.duration!);
     }
   }
@@ -151,18 +157,21 @@ export default function ClipTrimmer(props: { clip: IClip }) {
   function stopDragging() {
     if (isDragging.current === 'start') {
       HighlighterService.actions.setStartTrim(props.clip.path, localStartTrim);
-      UsageStatisticsService.actions.recordAnalyticsEvent('Highlighter', { type: 'Trim' });
     } else if (isDragging.current === 'end') {
       HighlighterService.actions.setEndTrim(props.clip.path, localEndTrim);
-      UsageStatisticsService.actions.recordAnalyticsEvent('Highlighter', { type: 'Trim' });
     }
 
     isDragging.current = null;
     playAt(localStartTrim);
+
+    UsageStatisticsService.actions.recordAnalyticsEvent(
+      HighlighterService.state.useAiHighlighter ? 'AIHighlighter' : 'Highlighter',
+      { type: 'Trim', clipPath: props.clip.path, streamId: props.streamId },
+    );
   }
 
   const scrubHeight = 100;
-  const scrubWidth = scrubHeight * (SCRUB_WIDTH / SCRUB_HEIGHT);
+  const scrubWidth = scrubHeight * (width / SCRUB_HEIGHT);
 
   // TODO: React to window size change
   useEffect(() => {
@@ -184,7 +193,7 @@ export default function ClipTrimmer(props: { clip: IClip }) {
       <video
         ref={videoRef}
         src={props.clip.path.replace('#', '%23')}
-        style={{ borderRadius: 5 }}
+        style={{ borderRadius: 5, height: '50vh' }}
         width="100%"
         onEnded={() => {
           setIsPlaying(false);
@@ -215,13 +224,13 @@ export default function ClipTrimmer(props: { clip: IClip }) {
               <img
                 key={frame}
                 src={props.clip.scrubSprite?.replace('#', '%23')}
-                width={SCRUB_WIDTH}
+                width={width}
                 height={SCRUB_HEIGHT}
                 style={{
                   height: scrubHeight,
                   width: scrubWidth,
                   objectFit: 'cover',
-                  objectPosition: `-${frame * SCRUB_WIDTH * (scrubHeight / SCRUB_HEIGHT)}px`,
+                  objectPosition: `-${frame * width * (scrubHeight / SCRUB_HEIGHT)}px`,
                   pointerEvents: 'none',
                   maxWidth: '100%',
                 }}

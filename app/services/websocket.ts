@@ -8,6 +8,8 @@ import { AppService } from 'services/app';
 import { IRecentEvent, ISafeModeServerSettings } from 'services/recent-events';
 import { importSocketIOClient } from '../util/slow-imports';
 import { SceneCollectionsService } from 'services/scene-collections';
+import { TPlatform } from './platforms';
+import Utils from './utils';
 
 export type TSocketEvent =
   | IStreamlabelsSocketEvent
@@ -21,7 +23,16 @@ export type TSocketEvent =
   | IUnpauseEventQueueSocketEvent
   | IPrimeSubEvent
   | ISafeModeEnabledSocketEvent
-  | ISafeModeDisabledSocketEvent;
+  | ISafeModeDisabledSocketEvent
+  | ISLIDMerged
+  | IUserAccountMerged
+  | IUserAccountUnlinked
+  | IUserAccountMergeError
+  | IAccountPermissionsRequired
+  | IStreamShiftRequested
+  | IStreamShiftActionCompleted
+  | IVisionSocketEvent
+  | IUserStateSocketEvent;
 
 interface IStreamlabelsSocketEvent {
   type: 'streamlabels';
@@ -51,7 +62,12 @@ export interface IEventSocketEvent {
     | 'tiltifydonation'
     | 'donordrivedonation'
     | 'justgivingdonation'
-    | 'treat';
+    | 'treat'
+    | 'powerUp'
+    | 'kicks'
+    | 'account_permissions_required'
+    | 'visionEvent'
+    | 'userStateUpdated';
   for: string;
   message: IRecentEvent[];
 }
@@ -115,6 +131,66 @@ interface ISafeModeDisabledSocketEvent {
   message: {};
 }
 
+interface ISLIDMerged {
+  type: 'slid.force_logout';
+  for: string;
+}
+
+interface IUserAccountMerged {
+  type: 'account_merged';
+  for: string;
+}
+interface IUserAccountUnlinked {
+  type: 'account_unlinked';
+  for: string;
+}
+interface IUserAccountMergeError {
+  type: 'account_merge_error';
+  for: string;
+  platform: TPlatform;
+  message: string;
+  code: number;
+}
+
+interface IAccountPermissionsRequired {
+  type: 'account_permissions_required';
+  for: string;
+  message: {
+    platform: string;
+    url: any;
+  }[];
+}
+
+export interface IStreamShiftRequested {
+  type: 'streamSwitchRequest';
+  for: string;
+  data: {
+    identifier: string;
+  };
+  event_id: string;
+}
+
+export interface IStreamShiftActionCompleted {
+  type: 'switchActionComplete';
+  for: string;
+  data: {
+    identifier: string;
+  };
+  event_id: string;
+}
+interface IVisionSocketEvent {
+  type: 'visionEvent';
+  message: {};
+}
+
+interface IUserStateSocketEvent {
+  type: 'userStateUpdated';
+  message: {
+    updated_states: any;
+    updated_states_tree: any;
+  };
+}
+
 export class WebsocketService extends Service {
   @Inject() private userService: UserService;
   @Inject() private hostsService: HostsService;
@@ -169,6 +245,18 @@ export class WebsocketService extends Service {
           this.socketEvent.next(e);
         });
       });
+  }
+
+  sendSocketEventForTest(event: TSocketEvent): void {
+    if (!Utils.isTestMode()) return;
+    this.socketEvent.next(event);
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = undefined;
+    }
   }
 
   private log(message: string, ...args: any[]) {

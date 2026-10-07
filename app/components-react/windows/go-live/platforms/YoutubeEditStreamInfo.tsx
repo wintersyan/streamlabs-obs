@@ -6,23 +6,23 @@ import {
   InputComponent,
   ListInput,
 } from '../../../shared/inputs';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Services } from '../../../service-provider';
 import { $t } from '../../../../services/i18n';
 import BroadcastInput from './BroadcastInput';
-import { useAsyncState } from '../../../hooks';
 import InputWrapper from '../../../shared/inputs/InputWrapper';
 import Form from '../../../shared/inputs/Form';
-import electron from 'electron';
-import { IYoutubeStartStreamOptions } from '../../../../services/platforms/youtube';
+import { IYoutubeStartStreamOptions, YoutubeService } from '../../../../services/platforms/youtube';
 import PlatformSettingsLayout, { IPlatformComponentParams } from './PlatformSettingsLayout';
 import { assertIsDefined } from '../../../../util/properties-type-guards';
+import { inject, injectQuery, useModule } from 'slap';
+import { CustomFieldsCheckbox } from '../CustomFieldsCheckbox';
 
 /***
  * Stream Settings for YT
  */
 export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams<'youtube'>) => {
-  const { YoutubeService, StreamingService } = Services;
+  const { StreamingService } = Services;
   const { isScheduleMode, isUpdateMode } = p;
   const isMidStreamMode = StreamingService.views.isMidStreamMode;
 
@@ -40,41 +40,44 @@ export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams
     fieldName => ({ disabled: fieldIsDisabled(fieldName as keyof IYoutubeStartStreamOptions) }),
   );
 
-  const [{ broadcastLoading, broadcasts }] = useAsyncState(
-    { broadcastLoading: true, broadcasts: [] },
-    async () => {
-      const broadcasts = await YoutubeService.actions.return.fetchEligibleBroadcasts();
+  const { broadcastsQuery } = useModule(() => {
+    const youtube = inject(YoutubeService);
+
+    async function fetchBroadcasts() {
+      const broadcasts = await youtube.actions.return.fetchEligibleBroadcasts();
       const shouldFetchSelectedBroadcast =
         broadcastId && !broadcasts.find(b => b.id === broadcastId);
 
       if (shouldFetchSelectedBroadcast) {
         assertIsDefined(broadcastId);
-        const selectedBroadcast = await YoutubeService.actions.return.fetchBroadcast(broadcastId);
+        const selectedBroadcast = await youtube.actions.return.fetchBroadcast(broadcastId);
         broadcasts.push(selectedBroadcast);
       }
+      return broadcasts;
+    }
 
-      return {
-        broadcastLoading: false,
-        broadcasts,
-      };
-    },
-  );
+    const broadcastsQuery = injectQuery([], fetchBroadcasts);
+
+    return { broadcastsQuery };
+  });
 
   // re-fill form when the broadcastId selected
   useEffect(() => {
     if (!broadcastId) return;
-    YoutubeService.actions.return
+
+    let isMounted = true;
+
+    Services.YoutubeService.actions.return
       .fetchStartStreamOptionsForBroadcast(broadcastId)
       .then(newYtSettings => {
+        if (!isMounted) return;
         updateSettings(newYtSettings);
       });
-  }, [broadcastId]);
 
-  function openThumbnailsEditor() {
-    electron.remote.shell.openExternal(
-      'https://streamlabs.com/dashboard#/prime/thumbnails?refl=slobs-thumbnail-editor',
-    );
-  }
+    return () => {
+      isMounted = false;
+    };
+  }, [broadcastId]);
 
   function fieldIsDisabled(fieldName: keyof IYoutubeStartStreamOptions): boolean {
     // selfDeclaredMadeForKids can be set only on the broadcast creating step
@@ -83,7 +86,7 @@ export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams
     }
 
     if (!isMidStreamMode) return false;
-    return !YoutubeService.updatableSettings.includes(fieldName);
+    return !Services.YoutubeService.updatableSettings.includes(fieldName);
   }
 
   function projectionChangeHandler(enable360: boolean) {
@@ -93,25 +96,27 @@ export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams
   function renderCommonFields() {
     return (
       <CommonPlatformFields
-        key="common"
+        key="youtube-common"
         platform="youtube"
         layoutMode={p.layoutMode}
         value={ytSettings}
         onChange={updateSettings}
+        layout={p.layout}
       />
     );
   }
 
   function renderBroadcastInput() {
     return (
-      <div key={'broadcast'}>
+      <div key="youtube-essential">
         {!isScheduleMode && (
           <BroadcastInput
             label={$t('Event')}
-            loading={broadcastLoading}
-            broadcasts={broadcasts}
+            loading={broadcastsQuery.isLoading}
+            broadcasts={broadcastsQuery.data}
             disabled={isUpdateMode}
             {...bind.broadcastId}
+            layout={p.layout}
           />
         )}
       </div>
@@ -120,95 +125,122 @@ export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams
 
   function renderOptionalFields() {
     return (
-      <div key="optional">
-        <ListInput
-          {...bind.privacyStatus}
-          label={$t('Privacy')}
-          options={[
-            {
-              value: 'public',
-              label: $t('Public'),
-              description: $t('Anyone can search for and view'),
-            },
-            {
-              value: 'unlisted',
-              label: $t('Unlisted'),
-              description: $t('Anyone with the link can view'),
-            },
-            { value: 'private', label: $t('Private'), description: $t('Only you can view') },
-          ]}
-        />
-        <ListInput
-          {...bind.categoryId}
-          label={$t('Category')}
-          showSearch
-          options={YoutubeService.state.categories.map(category => ({
-            value: category.id,
-            label: category.snippet.title,
-          }))}
-        />
-        <ImageInput
-          label={$t('Thumbnail')}
-          maxFileSize={2 * 1024 * 1024} // 2 mb
-          extra={<a onClick={openThumbnailsEditor}>{$t('Try our new thumbnail editor')}</a>}
-          {...bind.thumbnail}
-        />
-
-        <ListInput
-          label={$t('Stream Latency')}
-          tooltip={$t('latencyTooltip')}
-          options={[
-            { value: 'normal', label: $t('Normal Latency') },
-            { value: 'low', label: $t('Low-latency') },
-            {
-              value: 'ultraLow',
-              label: $t('Ultra low-latency'),
-              description: $t('Does not support: Closed captions, 1440p, and 4k resolutions'),
-            },
-          ]}
-          {...bind.latencyPreference}
-        />
-
-        <InputWrapper label={$t('Additional Settings')}>
-          {!isScheduleMode && (
-            <CheckboxInput
-              {...bind.enableAutoStart}
-              label={$t('Enable Auto-start')}
-              tooltip={$t(
-                'Enabling auto-start will automatically start the stream when you start sending data from your streaming software',
-              )}
+      <div key="youtube-optional">
+        {!isMidStreamMode && (
+          <>
+            <ListInput
+              {...bind.privacyStatus}
+              label={$t('Privacy')}
+              options={[
+                {
+                  value: 'public',
+                  label: $t('Public'),
+                  description: $t('Anyone can search for and view'),
+                },
+                {
+                  value: 'unlisted',
+                  label: $t('Unlisted'),
+                  description: $t('Anyone with the link can view'),
+                },
+                { value: 'private', label: $t('Private'), description: $t('Only you can view') },
+              ]}
+              layout={p.layout}
+              size="large"
             />
+            <ListInput
+              {...bind.categoryId}
+              label={$t('Category')}
+              showSearch
+              options={Services.YoutubeService.state.categories.map(category => ({
+                value: category.id,
+                label: category.snippet.title,
+              }))}
+              layout={p.layout}
+              size="large"
+            />
+            <ImageInput
+              label={$t('Thumbnail')}
+              maxFileSize={2 * 1024 * 1024} // 2 mb
+              {...bind.thumbnail}
+              layout={p.layout}
+            />
+
+            <ListInput
+              label={$t('Stream Latency')}
+              tooltip={$t('latencyTooltip')}
+              options={[
+                { value: 'normal', label: $t('Normal Latency') },
+                { value: 'low', label: $t('Low-latency') },
+                {
+                  value: 'ultraLow',
+                  label: $t('Ultra low-latency'),
+                  description: $t('Does not support: Closed captions, 1440p, and 4k resolutions'),
+                },
+              ]}
+              layout={p.layout}
+              size="large"
+              {...bind.latencyPreference}
+            />
+          </>
+        )}
+
+        <div className="flex__horizontal">
+          {!isScheduleMode && !isMidStreamMode && (
+            <InputWrapper label={$t('Enable Auto-start')} layout="vertical" nolabel>
+              <CheckboxInput
+                {...bind.enableAutoStart}
+                label={$t('Enable Auto-start')}
+                tooltip={$t(
+                  'Enabling auto-start will automatically start the stream when you start sending data from your streaming software',
+                )}
+              />
+            </InputWrapper>
           )}
           {!isScheduleMode && (
+            <InputWrapper label={$t('Enable Auto-stop')} layout="vertical" nolabel>
+              <CheckboxInput
+                {...bind.enableAutoStop}
+                label={$t('Enable Auto-stop')}
+                tooltip={$t(
+                  'Enabling auto-stop will automatically stop the stream when you stop sending data from your streaming software',
+                )}
+              />
+            </InputWrapper>
+          )}
+          <CustomFieldsCheckbox {...p} platform="youtube" />
+          <InputWrapper label={$t('Enable DVR')} layout="vertical" nolabel>
             <CheckboxInput
-              {...bind.enableAutoStop}
-              label={$t('Enable Auto-stop')}
+              {...bind.enableDvr}
+              label={$t('Enable DVR')}
               tooltip={$t(
-                'Enabling auto-stop will automatically stop the stream when you stop sending data from your streaming software',
+                'DVR controls enable the viewer to control the video playback experience by pausing, rewinding, or fast forwarding content',
               )}
             />
+          </InputWrapper>
+          {!isMidStreamMode && (
+            <>
+              <InputWrapper label={$t('360° video')} layout="vertical" nolabel>
+                <CheckboxInput
+                  label={$t('360° video')}
+                  value={is360video}
+                  onChange={projectionChangeHandler}
+                />
+              </InputWrapper>
+              <InputWrapper label={$t('Made for kids')} layout="vertical" nolabel>
+                <CheckboxInput label={$t('Made for kids')} {...bind.selfDeclaredMadeForKids} />
+              </InputWrapper>
+            </>
           )}
-          <CheckboxInput
-            {...bind.enableDvr}
-            label={$t('Enable DVR')}
-            tooltip={$t(
-              'DVR controls enable the viewer to control the video playback experience by pausing, rewinding, or fast forwarding content',
+        </div>
+        {/* Render the warning below the checkbox row so checking "Made for kids" doesn't
+            reflow the wrapping flex row and push the field to the next line. */}
+        {!isMidStreamMode && shouldShowSafeForKidsWarn && (
+          <p>
+            {$t(
+              "Features like personalized ads and live chat won't be available on live streams made for kids.",
             )}
-          />
-          <CheckboxInput
-            label={$t('360° video')}
-            value={is360video}
-            onChange={projectionChangeHandler}
-          />
-          <CheckboxInput label={$t('Made for kids')} {...bind.selfDeclaredMadeForKids} />
-          {shouldShowSafeForKidsWarn && (
-            <p>
-              {$t(
-                "Features like personalized ads and live chat won't be available on live streams made for kids.",
-              )}
-            </p>
-          )}
-        </InputWrapper>
+          </p>
+        )}
       </div>
     );
   }
@@ -218,7 +250,7 @@ export const YoutubeEditStreamInfo = InputComponent((p: IPlatformComponentParams
       <PlatformSettingsLayout
         layoutMode={p.layoutMode}
         commonFields={renderCommonFields()}
-        requiredFields={<div key={'empty'} />}
+        requiredFields={<div key="youtube-required" />}
         optionalFields={renderOptionalFields()}
         essentialOptionalFields={renderBroadcastInput()}
       />

@@ -5,7 +5,7 @@
   "Streamer Dashboard": "Yayıncı Panosu",
   "Share": "Paylaş",
   "Like": "Beğen",
-  "Step": "Adım",
+  "Step 3:": "3. Adım:",
   "Create a Facebook Gaming page to get started.": "Başlamak için bir Facebook Oyun sayfası oluşturun.",
   "Create a Gaming Page": "Oyun Sayfası Oluştur",
   "All of your scenes, sources, and settings will be preserved.": "Tüm sahneleriniz, kaynaklarınız ve ayarlarınız korunacaktır.",
@@ -30,7 +30,13 @@
   "Please reconnect Facebook to get these new features": "Bu yeni özellikleri edinmek için lütfen Facebook’a yeniden bağlanın",
   "Reconnect now": "Şimdi yeniden bağlan",
   "Privacy": "Gizlilik",
-  "FBPrivacyWarning": "Facebook hesabınız için verilen gizlilik düzeyi sınırlı olabilir. Streamlabs entegrasyonu için <link>buradan</link> \"Bu işletme entegrasyonunu kullandığınızı kimler görebilir\" bölümüne bakın.",
+  "FBPrivacyWarning": "Facebook hesabınız için sağlanan gizlilik düzeyi sınırlı olabilir. <link>Buradan</link> Streamlabs entegrasyonu için “Bu iş entegrasyonunu kullandığınızı kimler görebilir” bölümünü kontrol edin",
   "Only Me": "Yalnızca Ben",
-  "Do not change privacy settings": "Gizlilik ayarlarını değiştirme"
+  "Do not change privacy settings": "Gizlilik ayarlarını değiştirme",
+  "Install %{overlayName}": "Yükle %{overlayName}",
+  "Please note that while you can schedule streams to Facebook, some will not appear on this calendar due to API limitations": "Facebook’ta yayın planlamaları yapsanız da bazı yayınların API kısıtlamaları nedeniyle bu takvimde yer almayacağını unutmayın",
+  "Your account is not eligible to stream on Facebook. Click to learn more.": "Hesabınız Facebook'ta yayın yapmak için uygun değil. Daha fazla bilgi için tıklayın",
+  "You're not eligible to Go Live, your profile needs to be at least 60 days old and your page needs to have at least 100 followers": "Yayına Başla için uygun değilsiniz, profilinizin en az 60 günlük olması ve sayfanızın en az 100 takipçisi olması gerekir",
+  "You're not eligible to Go Live, your profile needs to be at least 60 days old and your page needs to have at least 100 followers. Click the notification to learn more.": "Yayına Başla için uygun değilsiniz, profilinizin en az 60 günlük olması ve sayfanızın en az 100 takipçisi olması gerekir. Daha fazla bilgi edinmek için bildirime tıklayın.",
+  "Stream Shift Error: Facebook is not live": "Stream Shift Hatası: Facebook canlı değil"
 }

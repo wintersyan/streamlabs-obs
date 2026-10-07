@@ -1,17 +1,11 @@
 import React from 'react';
-import { IWidgetState, useWidget, WidgetModule } from './common/useWidget';
+import { IWidgetCommonState, useWidget, WidgetModule } from './common/useWidget';
 import { WidgetLayout } from './common/WidgetLayout';
 import InputWrapper from '../shared/inputs/InputWrapper';
 import { $t } from '../../services/i18n';
-import {
-  CheckboxInput,
-  ColorInput,
-  createBinding,
-  FontFamilyInput,
-  FontSizeInput,
-} from '../shared/inputs';
+import { CheckboxInput, ColorInput, FontFamilyInput, FontSizeInput } from '../shared/inputs';
 
-interface IViewerCountState extends IWidgetState {
+interface IViewerCountState extends IWidgetCommonState {
   data: {
     settings: {
       font: string;
@@ -26,21 +20,21 @@ interface IViewerCountState extends IWidgetState {
 }
 
 export function ViewerCount() {
-  const { isLoading, bind } = useViewerCount();
+  const w = useViewerCount();
   // use 1 column layout
   return (
     <WidgetLayout>
-      {!isLoading && (
+      {!w.state.isLoading && w.settings && (
         <>
           <InputWrapper label={$t('Enabled Streams')}>
-            <CheckboxInput label={$t('Twitch Viewers')} {...bind.twitch} />
-            <CheckboxInput label={$t('YouTube Viewers')} {...bind.youtube} />
-            <CheckboxInput label={$t('Facebook Viewers')} {...bind.facebook} />
+            <CheckboxInput label={$t('Twitch Viewers')} {...w.bind.twitch} />
+            <CheckboxInput label={$t('YouTube Viewers')} {...w.bind.youtube} />
+            <CheckboxInput label={$t('Facebook Viewers')} {...w.bind.facebook} />
           </InputWrapper>
 
-          <FontFamilyInput label={$t('Font')} {...bind.font} />
-          <ColorInput label={$t('Font Color')} {...bind.font_color} />
-          <FontSizeInput label={$t('Font Size')} {...bind.font_size} debounce={500} />
+          <FontFamilyInput label={$t('Font')} {...w.bind.font} />
+          <ColorInput label={$t('Font Color')} {...w.bind.font_color} />
+          <FontSizeInput label={$t('Font Size')} {...w.bind.font_size} debounce={500} />
         </>
       )}
     </WidgetLayout>
@@ -48,11 +42,6 @@ export function ViewerCount() {
 }
 
 export class ViewerCountModule extends WidgetModule<IViewerCountState> {
-  bind = createBinding(
-    () => this.settings,
-    statePatch => this.updateSettings(statePatch),
-  );
-
   patchAfterFetch(data: any): IViewerCountState {
     // transform platform types to simple booleans
     return {

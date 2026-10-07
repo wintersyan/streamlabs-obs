@@ -17,8 +17,43 @@
   }
 
   &.hasVisibleSpinner .spinner {
-   transition: opacity 300ms;
-   visibility: visible;
-   opacity: 1;
+    transition: opacity 300ms;
+    visibility: visible;
+    opacity: 1;
+  }
+
+  &.inline {
+    position: static;
+    display: inline-flex;
+    align-items: center;
+    width: auto;
+    height: auto;
+    background-color: transparent;
+
+    :global(.s-spinner) {
+      width: auto;
+      height: auto;
+      padding: 0;
+    }
+
+    :global(.s-bars) {
+      display: flex;
+      align-items: center;
+      min-width: 0 !important;
+    }
+  }
+}
+
+.spinner-relative:extend(.container) {
+  :global(.s-bars) {
+    min-width: 15px !important;
+  }
+}
+
+.page-loader:extend(.container) {
+  position: relative !important;
+
+  :global(.s-bars) {
+    min-width: 50px !important;
   }
 }

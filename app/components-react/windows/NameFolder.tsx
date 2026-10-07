@@ -2,7 +2,7 @@ import { ModalLayout } from '../shared/ModalLayout';
 import { $t } from '../../services/i18n';
 import React, { useState } from 'react';
 import { Services } from '../service-provider';
-import { useOnCreate } from '../hooks';
+import { useOnCreate } from 'slap';
 import { assertIsDefined } from '../../util/properties-type-guards';
 import { TextInput } from '../shared/inputs/TextInput';
 import { Button } from 'antd';
@@ -30,14 +30,16 @@ export default function NameFolder() {
 
   // get window options on component create
   const options = useOnCreate(() => {
-    const options = (WindowsService.state.child.queryParams as unknown) as IWindowOptions;
-    const scene = ScenesService.views.getScene(options.sceneId);
+    const windowOptions = (WindowsService.state.child.queryParams as unknown) as IWindowOptions;
+    const scene = ScenesService.views.getScene(
+      windowOptions.sceneId ?? ScenesService.views.activeSceneId,
+    );
     assertIsDefined(scene);
-    const name = options.renameId
-      ? scene.getFolder(options.renameId)!.name
+    const name = windowOptions.renameId
+      ? scene.getFolder(windowOptions.renameId)!.name
       : ScenesService.suggestName('New Folder');
     setName(name);
-    return options;
+    return windowOptions;
   });
 
   // define a submit method
@@ -73,8 +75,8 @@ export default function NameFolder() {
   }
 
   return (
-    <ModalLayout onOk={submit} okText={$t('Submit')}>
-      <Form layout="vertical" form={form}>
+    <ModalLayout onOk={submit}>
+      <Form layout="vertical" form={form} onFinish={submit}>
         <TextInput
           name="name"
           value={name}
@@ -82,6 +84,7 @@ export default function NameFolder() {
           label={$t('Please enter the name of the folder')}
           required={true}
           uncontrolled={false}
+          autoFocus
         />
       </Form>
     </ModalLayout>

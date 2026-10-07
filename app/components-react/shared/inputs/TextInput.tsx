@@ -5,7 +5,15 @@ import InputWrapper from './InputWrapper';
 import { InputProps } from 'antd/lib/input';
 
 // select which features from the antd lib we are going to use
-const ANT_INPUT_FEATURES = ['addonBefore', 'addonAfter', 'autoFocus'] as const;
+// note: to add a submit button for the text input, pass in a button to the `addonAfter` or `addonBefore` prop
+export const ANT_INPUT_FEATURES = [
+  'addonBefore',
+  'addonAfter',
+  'autoFocus',
+  'prefix',
+  'size',
+  'placeholder',
+] as const;
 
 export type TTextInputProps = TSlobsInputProps<
   {
@@ -13,6 +21,7 @@ export type TTextInputProps = TSlobsInputProps<
     onFocus?: React.FocusEventHandler<HTMLInputElement>;
     onBlur?: React.FocusEventHandler<HTMLInputElement>;
     onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+    onMouseDown?: React.MouseEventHandler<HTMLInputElement>;
     inputRef?: React.Ref<Input>;
     isPassword?: boolean;
   },
@@ -27,7 +36,9 @@ export const TextInput = InputComponent((p: TTextInputProps) => {
     ...inputAttrs,
     onFocus: p.onFocus,
     onKeyDown: p.onKeyDown,
+    onMouseDown: p.onMouseDown,
     ref: p.inputRef,
+    prefix: p.prefix,
   };
   return (
     <InputWrapper {...wrapperAttrs}>

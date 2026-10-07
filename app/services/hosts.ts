@@ -1,6 +1,8 @@
 import { Service } from './core/service';
 import Util from 'services/utils';
 import { Inject } from './core/injector';
+import { ViewHandler } from './core';
+import { I18nService } from 'app-services';
 
 // Hands out hostnames to the rest of the app. Eventually
 // we should allow overriding this value. But for now we
@@ -9,7 +11,10 @@ export class HostsService extends Service {
   get streamlabs() {
     if (Util.shouldUseLocalHost()) {
       return 'streamlabs.site';
+    } else if (Util.shouldUseBeta()) {
+      return 'beta.streamlabs.com';
     }
+
     return 'streamlabs.com';
   }
 
@@ -24,7 +29,10 @@ export class HostsService extends Service {
   get io() {
     if (Util.shouldUseLocalHost()) {
       return 'http://io.streamlabs.site:4567';
+    } else if (Util.shouldUseBeta()) {
+      return 'https://beta.streamlabs.com';
     }
+
     return 'https://aws-io.streamlabs.com';
   }
 
@@ -36,13 +44,34 @@ export class HostsService extends Service {
     return 'platform.streamlabs.com';
   }
 
+  get highlighterCdn() {
+    if (Util.shouldUseBeta()) {
+      return 'cdn-highlighter-desktop.streamlabs.com/staging';
+    }
+
+    return 'cdn-highlighter-desktop.streamlabs.com/production';
+  }
+
   get analitycs() {
     return 'r2d2.streamlabs.com';
+  }
+
+  get streamAvatarApi() {
+    if (Util.getAvatarEnvironment() === 'local') {
+      return 'localhost:3000';
+    }
+
+    if (Util.getAvatarEnvironment() === 'staging') {
+      return 'ai-agent.streamlabs.com';
+    }
+
+    return 'isa.streamlabs.com';
   }
 }
 
 export class UrlService extends Service {
   @Inject('HostsService') private hosts: HostsService;
+  @Inject('I18nService') private i18nService: I18nService;
 
   get protocol() {
     return Util.shouldUseLocalHost() ? 'http://' : 'https://';
@@ -50,5 +79,10 @@ export class UrlService extends Service {
 
   getStreamlabsApi(endpoint: string) {
     return `${this.protocol}${this.hosts.streamlabs}/api/v5/slobs/${endpoint}`;
+  }
+
+  get supportLink() {
+    const locale = this.i18nService.state.locale;
+    return `https://support.streamlabs.com/hc/${locale.toLowerCase()}`;
   }
 }

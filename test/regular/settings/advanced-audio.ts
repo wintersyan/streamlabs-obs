@@ -1,12 +1,13 @@
-import { test, TExecutionContext, useSpectron } from '../../helpers/spectron';
+import { test, TExecutionContext, useWebdriver } from '../../helpers/webdriver';
 import { ISceneCollectionsServiceApi } from '../../../app/services/scene-collections';
 import { getApiClient } from '../../helpers/api-client';
 import { click, closeWindow, focusChild, focusMain } from '../../helpers/modules/core';
 import { useForm } from '../../helpers/modules/forms';
 import { showSettingsWindow } from '../../helpers/modules/settings/settings';
-import { setFormDropdown } from '../../helpers/spectron/forms';
 
-useSpectron();
+// not a react hook
+// eslint-disable-next-line react-hooks/rules-of-hooks
+useWebdriver();
 
 async function clickAdvancedAudio(t: TExecutionContext) {
   const $mixer = await t.context.app.client.$('h2=Mixer');
@@ -29,7 +30,8 @@ const DEFAULT_DETAIL_SETTINGS = {
 
 test('Change Advanced Audio Settings', async t => {
   await showSettingsWindow('Output');
-  await setFormDropdown('Output Mode', 'Advanced');
+  const { fillForm } = useForm('Mode');
+  await fillForm({ Mode: 'Advanced' });
   await closeWindow('child');
   await focusMain();
 

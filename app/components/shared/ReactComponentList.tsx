@@ -1,5 +1,14 @@
 import { Component } from 'vue-property-decorator';
 import ReactComponent from './ReactComponent';
+import { IReactiveDataEditorProps } from 'components-react/windows/reactive-data-editor/types';
+
+@Component({
+  props: {
+    name: { default: 'AddSource' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class AddSource extends ReactComponent {}
 
 @Component({
   props: {
@@ -17,24 +26,13 @@ export class AdvancedAudio extends ReactComponent {}
 })
 export class AdvancedStatistics extends ReactComponent {}
 
+@Component({ props: { name: { default: 'Blank' } } })
+export class Blank extends ReactComponent {}
+
 @Component({
-  props: {
-    name: { default: 'AppsNav' },
-    wrapperStyles: {
-      default: () => ({
-        background: 'var(--section-alt)',
-        position: 'relative',
-        width: '52px',
-        height: 0,
-        paddingTop: '6px',
-        flexGrow: 1,
-        flexBasis: 0,
-        overflow: 'hidden',
-      }),
-    },
-  },
+  props: { name: { default: 'Browser' }, wrapperStyles: { default: () => ({ height: '100%' }) } },
 })
-export class AppsNav extends ReactComponent {}
+export class Browser extends ReactComponent {}
 
 @Component({
   props: {
@@ -44,17 +42,6 @@ export class AppsNav extends ReactComponent {}
   },
 })
 export class BrowserView extends ReactComponent {}
-
-@Component({
-  props: {
-    name: { default: 'Chat' },
-    componentProps: { default: () => ({ restream: false }) },
-    wrapperStyles: {
-      default: () => ({ height: '100%', display: 'flex', flexDirection: 'column' }),
-    },
-  },
-})
-export class Chat extends ReactComponent {}
 
 @Component({
   props: {
@@ -80,6 +67,30 @@ export class EditStreamWindow extends ReactComponent {}
 
 @Component({
   props: {
+    name: { default: 'EditTransform' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class EditTransform extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'EditAutomations' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class EditAutomations extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'KevinSupport' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class KevinSupport extends ReactComponent {}
+
+@Component({
+  props: {
     name: { default: 'GoLiveWindow' },
     wrapperStyles: { default: () => ({ height: '100%' }) },
   },
@@ -88,26 +99,11 @@ export class GoLiveWindow extends ReactComponent {}
 
 @Component({
   props: {
-    name: { default: 'Grow' },
-    wrapperStyles: { default: () => ({ gridRow: '1 / span 1' }) },
+    name: { default: 'GuestCamProperties' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
   },
 })
-export class Grow extends ReactComponent {}
-
-@Component({
-  props: {
-    name: { default: 'Highlighter' },
-    componentProps: { default: () => ({}) },
-  },
-})
-export class Highlighter extends ReactComponent {}
-
-@Component({
-  props: {
-    name: { default: 'Loader' },
-  },
-})
-export class Loader extends ReactComponent {}
+export class GuestCamProperties extends ReactComponent {}
 
 @Component({
   props: {
@@ -119,6 +115,58 @@ export class IconLibraryProperties extends ReactComponent {}
 
 @Component({
   props: {
+    name: { default: 'InstalledApps' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class InstalledApps extends ReactComponent {}
+
+@Component({ props: { name: { default: 'Loader' } } })
+export class Loader extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'Main' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class Main extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'LiveDock' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+    componentProps: { default: () => ({ onLeft: false }) },
+  },
+})
+export class LiveDock extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'ManageSceneCollections' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class ManageSceneCollections extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'MarketingModal' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class MarketingModal extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'MediaGallery' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class MediaGallery extends ReactComponent {}
+
+@Component({
+  props: {
     name: { default: 'NameFolder' },
     wrapperStyles: { default: () => ({ height: '100%' }) },
   },
@@ -127,28 +175,18 @@ export class NameFolder extends ReactComponent {}
 
 @Component({
   props: {
-    name: { default: 'NavTools' },
-    wrapperStyles: { default: () => ({ marginTop: 'auto', flexShrink: 0 }) },
+    name: { default: 'NameScene' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
   },
 })
-export class NavTools extends ReactComponent {}
-
-@Component({ props: { name: { default: 'NewsBanner' } } })
-export class NewsBanner extends ReactComponent {}
-
-@Component({ props: { name: { default: 'NotificationsArea' } } })
-export class NotificationsArea extends ReactComponent {}
-
+export class NameScene extends ReactComponent {}
 @Component({
   props: {
-    name: { default: 'ObsSettings' },
-    componentProps: { default: () => ({ page: 'General' }) },
+    name: { default: 'NotificationsAndNews' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
   },
 })
-export class ObsSettings extends ReactComponent {}
-
-@Component({ props: { name: { default: 'PatchNotes' } } })
-export class PatchNotes extends ReactComponent {}
+export class NotificationsAndNews extends ReactComponent {}
 
 @Component({
   props: {
@@ -158,18 +196,60 @@ export class PatchNotes extends ReactComponent {}
 })
 export class PerformanceMetrics extends ReactComponent<{ mode: 'full' | 'limited' }> {}
 
+@Component({ props: { name: { default: 'PlatformAppPageView' } } })
+export class PlatformAppPageView extends ReactComponent {}
+
+@Component({ props: { name: { default: 'PlatformAppMainPage' } } })
+export class PlatformAppMainPage extends ReactComponent {}
+
 @Component({
   props: {
-    name: { default: 'PlatformLogo' },
-    wrapperStyles: { default: () => ({}) },
+    name: { default: 'PlatformAppPopOut' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
   },
 })
+export class PlatformAppPopOut extends ReactComponent {}
+
+@Component({ props: { name: { default: 'PlatformAppStore' } } })
+export class PlatformAppStore extends ReactComponent {}
+
+@Component({ props: { name: { default: 'PlatformLogo' } } })
 export class PlatformLogo extends ReactComponent<{
   platform: string;
   size?: 'medium' | number;
   color?: string;
   unwrapped?: boolean;
 }> {}
+
+@Component({
+  props: {
+    name: { default: 'PlatformMerge' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class PlatformMerge extends ReactComponent {}
+
+@Component({
+  props: { name: { default: 'Projector' }, wrapperStyles: { default: () => ({ height: '100%' }) } },
+})
+export class Projector extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'RecentEvents' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+    componentProps: { default: () => ({ isOverlay: false }) },
+  },
+})
+export class RecentEvents extends ReactComponent<{ isOverlay?: boolean }> {}
+
+@Component({
+  props: {
+    name: { default: 'RecentEventsWindow' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class RecentEventsWindow extends ReactComponent {}
 
 @Component({
   props: {
@@ -189,11 +269,38 @@ export class SafeMode extends ReactComponent {}
 
 @Component({
   props: {
+    name: { default: 'SceneTransitions' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class SceneTransitions extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'Settings' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class Settings extends ReactComponent {}
+
+@Component({
+  props: {
     name: { default: 'SourceProperties' },
     wrapperStyles: { default: () => ({ height: '100%' }) },
   },
 })
 export class SourceProperties extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'ReactiveDataEditorWindow' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+    componentProps: {
+      default: () => ({ stateKeysOfInterest: [] } as IReactiveDataEditorProps),
+    },
+  },
+})
+export class ReactiveDataEditorWindow extends ReactComponent<IReactiveDataEditorProps> {}
 
 @Component({
   props: {
@@ -228,12 +335,6 @@ export class SourceShowcase extends ReactComponent {}
 @Component({ props: { name: { default: 'StartStreamingButton' } } })
 export class StartStreamingButton extends ReactComponent {}
 
-@Component({ props: { name: { default: 'StreamScheduler' } } })
-export class StreamScheduler extends ReactComponent {}
-
-@Component({ props: { name: { default: 'StudioEditor' } } })
-export class StudioEditor extends ReactComponent {}
-
 @Component({
   props: {
     name: { default: 'TestWidgets' },
@@ -242,9 +343,6 @@ export class StudioEditor extends ReactComponent {}
 })
 export class TestWidgets extends ReactComponent<{ testers: string[] }> {}
 
-@Component({ props: { name: { default: 'ThemeAudit' } } })
-export class ThemeAudit extends ReactComponent {}
-
 @Component({
   props: {
     name: { default: 'TitleBar' },
@@ -252,6 +350,22 @@ export class ThemeAudit extends ReactComponent {}
   },
 })
 export class TitleBar extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'Troubleshooter' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class Troubleshooter extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'WelcomeToPrime' },
+    wrapperStyles: { default: () => ({ height: '100%' }) },
+  },
+})
+export class WelcomeToPrime extends ReactComponent {}
 
 @Component({
   props: {
@@ -268,3 +382,52 @@ export class WidgetWindow extends ReactComponent {}
   },
 })
 export class CustomCodeWindow extends ReactComponent {}
+
+@Component({ props: { name: { default: 'DismissableBadge' } } })
+export class DismissableBadge extends ReactComponent {}
+@Component({ props: { name: { default: 'UltraIcon' } } })
+export class UltraIcon extends ReactComponent<{
+  type?: string;
+  className?: string;
+}> {}
+
+@Component({ props: { name: { default: 'AuthModal' } } })
+export class AuthModal extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'Hotkeys' },
+    componentProps: {
+      default: () => ({
+        globalSearchStr: '',
+        highlightSearch: () => {},
+        scanning: false,
+      }),
+    },
+  },
+})
+export class Hotkeys extends ReactComponent<{
+  globalSearchStr: string;
+  highlightSearch: (searchStr: string) => void;
+  scanning: boolean;
+}> {}
+
+@Component({
+  props: {
+    name: { default: 'GLVolmeters' },
+    wrapperStyles: {
+      default: () => ({ position: 'absolute', left: '17px', right: '17px', height: '100%' }),
+    },
+  },
+})
+export class GLVolmeters extends ReactComponent {}
+
+@Component({
+  props: {
+    name: { default: 'MultistreamChatInfo' },
+    wrapperStyles: {
+      default: () => ({ width: '100%', height: '100%', minWidth: '748px', minHeight: '635px' }),
+    },
+  },
+})
+export class MultistreamChatInfo extends ReactComponent {}

@@ -1,20 +1,27 @@
-import styles from './GoLive.m.less';
-import Scrollable from '../../shared/Scrollable';
-import { Services } from '../../service-provider';
 import React from 'react';
+import styles from './GoLive.m.less';
+import Scrollable from 'components-react/shared/Scrollable';
 import { useGoLiveSettings } from './useGoLiveSettings';
-import { DestinationSwitchers } from './DestinationSwitchers';
-import { $t } from '../../../services/i18n';
+import { $t } from 'services/i18n';
 import { Row, Col } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
 import { Section } from './Section';
 import PlatformSettings from './PlatformSettings';
-import TwitterInput from './Twitter';
 import OptimizedProfileSwitcher from './OptimizedProfileSwitcher';
-import Spinner from '../../shared/Spinner';
+import Spinner from 'components-react/shared/Spinner';
 import GoLiveError from './GoLiveError';
-
-const PlusIcon = PlusOutlined as Function;
+import PrimaryChatSwitcher from './PrimaryChatSwitcher';
+import ColorSpaceWarnings from './ColorSpaceWarnings';
+import { DestinationSwitchers } from './DestinationSwitchers';
+import AddDestinationButton from 'components-react/shared/AddDestinationButton';
+import cx from 'classnames';
+import { CaretDownOutlined } from '@ant-design/icons';
+import * as remote from '@electron/remote';
+import { inject } from 'slap';
+import { VideoEncodingOptimizationService } from 'services/video-encoding-optimizations';
+import { MagicLinkService } from 'services/magic-link';
+import { SettingsService } from 'services/settings';
+import { EAvailableFeatures, IncrementalRolloutService } from 'services/incremental-rollout';
+import StreamShiftToggle from 'components-react/shared/StreamShiftToggle';
 
 /**
  * Renders settings for starting the stream
@@ -23,69 +30,150 @@ const PlusIcon = PlusOutlined as Function;
  * - Extras settings
  **/
 export default function GoLiveSettings() {
-  const { RestreamService, SettingsService, UserService, MagicLinkService } = Services;
-
   const {
-    isAdvancedMode,
-    protectedModeEnabled,
-    error,
     isLoading,
-    canAddDestinations,
-  } = useGoLiveSettings().selectExtra(module => {
-    const linkedPlatforms = module.linkedPlatforms;
-    const customDestinations = module.customDestinations;
+    canUseOptimizedProfile,
+    hasMultiplePlatforms,
+    enabledPlatforms,
+    primaryChat,
+    recommendedColorSpaceWarnings,
+    isPrime,
+    shouldShowLeftCol,
+    isStreamShiftDisabled,
+    canEditLiveOutputs,
+    addDestination,
+    showTopAddDestination,
+    showBottomAddDestination,
+    shouldShowSettings,
+    setPrimaryChat,
+  } = useGoLiveSettings().extend(module => {
     return {
-      canAddDestinations: linkedPlatforms.length + customDestinations.length < 5,
+      videoEncodingOptimizationService: inject(VideoEncodingOptimizationService),
+      settingsService: inject(SettingsService),
+      magicLinkService: inject(MagicLinkService),
+      incrementalRolloutService: inject(IncrementalRolloutService),
+
+      addDestination() {
+        this.settingsService.actions.showSettings('Stream');
+      },
+
+      // temporarily hide the checkbox until streaming and output settings
+      // are migrated to the new API
+      get canUseOptimizedProfile() {
+        return (
+          this.videoEncodingOptimizationService.state.canSeeOptimizedProfile ||
+          this.videoEncodingOptimizationService.state.useOptimizedProfile
+        );
+      },
+
+      get shouldShowSettings() {
+        return !module.error && !module.isLoading;
+      },
+
+      get shouldShowLeftCol() {
+        return module.isStreamShiftMode ? true : module.protectedModeEnabled;
+      },
+
+      get canEditLiveOutputs() {
+        return this.incrementalRolloutService.views.featureIsEnabled(
+          EAvailableFeatures.liveOutputEditing,
+        );
+      },
+
+      async openPlatformSettings() {
+        try {
+          const link = await this.magicLinkService.getDashboardMagicLink(
+            'settings/account-settings/platforms',
+          );
+          remote.shell.openExternal(link);
+        } catch (e: unknown) {
+          console.error('Error generating platform settings magic link', e);
+        }
+      },
     };
   });
 
-  const shouldShowSettings = !error && !isLoading;
-  const shouldShowPrimeLabel = !RestreamService.state.grandfathered;
-  const shouldShowLeftCol = protectedModeEnabled;
-  const shouldShowAddDestButton = canAddDestinations;
+  const headerText = $t('Destinations');
 
-  function addDestination() {
-    // open the stream settings or prime page
-    if (UserService.views.isPrime) {
-      SettingsService.actions.showSettings('Stream');
-    } else {
-      MagicLinkService.linkToPrime('slobs-multistream');
-    }
-  }
+  const featureCheckboxWidth = isPrime ? 130 : 135;
 
   return (
-    <Row gutter={16} style={{ height: 'calc(100% + 24px)' }}>
+    <Row gutter={8} className={styles.goLiveSettings}>
       {/*LEFT COLUMN*/}
       {shouldShowLeftCol && (
-        <Col span={8}>
-          {/*DESTINATION SWITCHERS*/}
-          <DestinationSwitchers />
-          {/*ADD DESTINATION BUTTON*/}
-          {shouldShowAddDestButton && (
-            <a className={styles.addDestinationBtn} onClick={addDestination}>
-              <PlusIcon />
-              {$t('Add Destination')}{' '}
-              {shouldShowPrimeLabel && <b className={styles.prime}>prime</b>}
-            </a>
+        <Col span={7} className={styles.leftColumn}>
+          <h2>{headerText}</h2>
+          {!isPrime && (
+            <AddDestinationButton type="banner" className={styles.addDestinationBanner} />
           )}
+
+          <Scrollable className={cx(styles.leftColumnScroll, { [styles.nonUltra]: !isPrime })}>
+            {showTopAddDestination && (
+              <AddDestinationButton
+                name="top-add-destination"
+                type="small"
+                onClick={addDestination}
+              />
+            )}
+            <DestinationSwitchers />
+            {showBottomAddDestination && (
+              <AddDestinationButton
+                name="bottom-add-destination"
+                type="small"
+                className={styles.bottom}
+                onClick={addDestination}
+              />
+            )}
+            <div className={styles.leftFooter}>
+              <PrimaryChatSwitcher
+                className={cx(styles.primaryChat, {
+                  [styles.disabled]: !hasMultiplePlatforms,
+                })}
+                enabledPlatforms={enabledPlatforms}
+                onSetPrimaryChat={setPrimaryChat}
+                primaryChat={primaryChat}
+                suffixIcon={<CaretDownOutlined />}
+                layout="horizontal"
+                logo={false}
+                border={false}
+                disabled={!hasMultiplePlatforms}
+              />
+
+              {/* STREAM SHIFT TOGGLE */}
+              {/* Remove after feature flag removed */}
+              {!canEditLiveOutputs && (
+                <StreamShiftToggle
+                  style={{ width: featureCheckboxWidth }}
+                  disabled={isStreamShiftDisabled}
+                />
+              )}
+            </div>
+          </Scrollable>
         </Col>
       )}
 
       {/*RIGHT COLUMN*/}
-      <Col span={shouldShowLeftCol ? 16 : 24} style={{ height: '100%' }}>
-        <Spinner visible={isLoading} />
+      <Col
+        span={shouldShowLeftCol ? 17 : 24}
+        className={cx(styles.rightColumn, {
+          [styles.unprotectedMode]: !shouldShowLeftCol,
+        })}
+      >
+        <Spinner visible={isLoading} relative />
         <GoLiveError />
         {shouldShowSettings && (
-          <Scrollable style={{ height: '100%' }} snapToWindowEdge>
+          <Scrollable className={styles.rightColumnScroll}>
+            {recommendedColorSpaceWarnings && (
+              <ColorSpaceWarnings warnings={recommendedColorSpaceWarnings} />
+            )}
             {/*PLATFORM SETTINGS*/}
             <PlatformSettings />
-            {/*ADD SOME SPACE IN ADVANCED MODE*/}
-            {isAdvancedMode && <div className={styles.spacer} />}
             {/*EXTRAS*/}
-            <Section isSimpleMode={!isAdvancedMode} title={$t('Extras')}>
-              <TwitterInput />
-              <OptimizedProfileSwitcher />
-            </Section>
+            {!!canUseOptimizedProfile && (
+              <Section title={$t('Extras')}>
+                <OptimizedProfileSwitcher />
+              </Section>
+            )}
           </Scrollable>
         )}
       </Col>

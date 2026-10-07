@@ -13,8 +13,9 @@ import {
 import cloneDeep from 'lodash/cloneDeep';
 import pick from 'lodash/pick';
 import uuid from 'uuid/v4';
-import { Subscription } from 'rxjs';
+import { Subject, Subscription } from 'rxjs';
 import mapValues from 'lodash/mapValues';
+import { WidgetsService, WidgetType } from './widgets';
 
 export interface IRecentEvent {
   name?: string;
@@ -34,6 +35,7 @@ export interface IRecentEvent {
   formatted_amount?: string;
   formattedAmount?: string;
   sub_plan?: string;
+  sub_type?: string;
   months?: number;
   streak_months?: number;
   gifter?: string;
@@ -51,6 +53,7 @@ export interface IRecentEvent {
   read: boolean;
   hash: string;
   isTest?: boolean;
+  isPreview?: boolean;
   repeat?: boolean;
   // uuid is local and will NOT persist across app restarts/ fetches
   uuid: string;
@@ -59,6 +62,9 @@ export interface IRecentEvent {
   skill_currency?: string;
   skill_name?: string;
   recurring_donation?: { id: string; months?: number };
+  redeemer_display_name?: string;
+  power_up_name?: string;
+  power_up_prompt?: string;
 }
 
 interface IRecentEventsConfig {
@@ -93,6 +99,7 @@ interface IRecentEventFilterConfig {
   gifted_sub_tier_3?: boolean;
   host?: boolean;
   bits?: boolean;
+  power_up?: boolean;
   raid?: boolean;
   // YouTube
   subscriber?: boolean;
@@ -101,6 +108,11 @@ interface IRecentEventFilterConfig {
   // Mixer
   sticker?: boolean;
   effect?: boolean;
+  // Kick
+  kick_follow?: boolean;
+  kick_kicks?: boolean;
+  kick_subscription?: boolean;
+  kick_subscription_gifts?: boolean;
   // Facebook Live
   facebook_support?: boolean;
   facebook_like?: boolean;
@@ -126,6 +138,7 @@ interface ISafeModeSettings {
 interface IRecentEventsState {
   recentEvents: IRecentEvent[];
   muted: boolean;
+  enableChatNotifs: boolean;
   mediaShareEnabled: boolean;
   filterConfig: IRecentEventFilterConfig;
   queuePaused: boolean;
@@ -143,6 +156,11 @@ export interface ISafeModeServerSettings {
   sub_only: boolean;
   enable_timer: boolean;
   time_in_minutes: number;
+}
+
+enum ESafeModeStatus {
+  Enabled = 'enabled',
+  Disabled = 'disabled',
 }
 
 const subscriptionMap = (subPlan: string) => {
@@ -176,20 +194,34 @@ const filterName = (key: string): string => {
     resub_tier_3: $t('Tier 3'),
     resub_prime: $t('Prime'),
     gifted_sub: $t('Gifted'),
-    host: $t('Hosts'),
     bits: $t('Bits'),
+    power_up: $t('Power-Ups'),
     raid: $t('Raids'),
     subscriber: $t('Subscribers'),
     sponsor: $t('Members'),
     superchat: $t('Super Chats'),
     sticker: $t('Stickers'),
     effect: $t('Effects'),
+    kick_kicks: $t('Kicks'),
+    kick_follow: $t('Follows'),
+    kick_subscription: $t('Subs'),
+    kick_subscription_gifts: $t('Gifted'),
     facebook_support: $t('Supports'),
     facebook_like: $t('Likes'),
     facebook_share: $t('Shares'),
     facebook_stars: $t('Stars'),
   }[key];
 };
+
+function getRecentEventType(event: IEventSocketEvent): string {
+  if (event.for === 'kick_account') {
+    return `kick_${event.type}`;
+  }
+  if (event.type === 'powerUp') {
+    return 'power_up';
+  }
+  return event.type;
+}
 
 /**
  * This function duplicates per-event logic from streamlabs.com for
@@ -200,49 +232,45 @@ const filterName = (key: string): string => {
 function getHashForRecentEvent(event: IRecentEvent) {
   switch (event.type) {
     case 'donation':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
     case 'bits':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
     case 'donordrivedonation':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
     case 'eldonation':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
-    case 'follow':
-      return [event.type, event.name, event.message].join(':');
-    case 'host':
-      return [event.type, event.name, event.host_type].join(':');
     case 'justgivingdonation':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
-    case 'loyalty_store_redemption':
-      return [event.type, event.from, event.message].join(':');
+    case 'kick_kicks':
     case 'pledge':
-      return [event.type, event.name, parseInt(event.amount, 10), event.from].join(':');
-    case 'prime_sub_gift':
-      return [event.type, event.name, event.streamer, event.giftType].join(':');
-    case 'raid':
-      return [event.type, event.name, event.from].join(':');
-    case 'redemption':
-      return [event.type, event.name, event.message].join(':');
-    case 'sticker':
-      return [event.name, event.type, event.currency].join(':');
-    case 'subscription':
-      return [event.type, event.name.toLowerCase(), event.message].join(':');
-    case 'superchat':
-      return [event.type, event.name, event.message].join(':');
     case 'superheart':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
     case 'tiltifydonation':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
-    case 'treat':
-      return [event.type, event.name, event.title, event.message, event.createdAt].join(':');
-    case 'like':
-      return [event.type, event.name, event._id].join(':');
-    case 'share':
-      return [event.type, event.name, event._id].join(':');
     case 'stars':
-      return [event.type, event.name, event.message, parseInt(event.amount, 10)].join(':');
+      return [
+        event.type,
+        event.name,
+        event.message,
+        event.amount ? parseInt(event.amount, 10) : 0,
+      ].join(':');
+    case 'follow':
+    case 'kick_follow':
+    case 'loyalty_store_redemption':
+    case 'redemption':
+    case 'superchat':
+      return [event.type, event.from, event.message].join(':');
+    case 'like':
+    case 'share':
     case 'support':
       return [event.type, event.name, event._id].join(':');
+    case 'power_up':
+      return [event.type, event.redeemer_display_name, event.power_up_name].join(':');
+    case 'prime_sub_gift':
+      return [event.type, event.name, event.streamer, event.giftType].join(':');
+    case 'sticker':
+      return [event.name, event.type, event.currency].join(':');
+    case 'raid':
+      return [event.type, event.name, event.from].join(':');
+    case 'subscription':
+    case 'kick_subscription':
+    case 'kick_subscription_gifts':
+      return [event.type, event.name?.toLowerCase(), event.message].join(':');
+    case 'treat':
+      return [event.type, event.name, event.title, event.message, event.createdAt].join(':');
     case 'merch':
       return [event.type, event.message, event.createdAt].join(':');
     default:
@@ -257,15 +285,16 @@ const SUPPORTED_EVENTS = [
   'follow',
   'subscription',
   'bits',
-  'host',
-  'raid',
+  'powerUp',
   'sticker',
   'effect',
   'like',
+  'raid',
   'stars',
   'support',
   'share',
   'superchat',
+  'kicks',
   'pledge',
   'eldonation',
   'tiltifydonation',
@@ -275,6 +304,7 @@ const SUPPORTED_EVENTS = [
 ];
 
 class RecentEventsViews extends ViewHandler<IRecentEventsState> {
+  @Inject() private widgetsService: WidgetsService;
   getEventString(event: IRecentEvent) {
     return {
       donation: this.getDonoString(event),
@@ -284,11 +314,16 @@ class RecentEventsViews extends ViewHandler<IRecentEventsState> {
       subscription: this.getSubString(event),
       // Twitch
       bits: $t('has used'),
-      host: $t('has hosted you with %{viewers} viewers', { viewers: event.viewers }),
+      power_up: $t('has redeemed'),
       raid: $t('has raided you with a party of %{viewers}', { viewers: event.raiders }),
       // Mixer
       sticker: $t('has used %{skill} for', { skill: event.skill }),
       effect: $t('has used %{skill} for', { skill: event.skill }),
+      // Kick
+      kick_follow: $t('has followed'),
+      kick_kicks: $t('has used'),
+      kick_subscription: this.getSubString(event),
+      kick_subscription_gifts: this.getSubString(event),
       // Facebook
       like: $t('has liked'),
       stars: $t('has used'),
@@ -327,13 +362,21 @@ class RecentEventsViews extends ViewHandler<IRecentEventsState> {
         return $t('has been a supporter for %{months} months', { months: event.months });
       }
       return $t('has become a supporter');
-    }
-    if (event.platform === 'youtube_account') {
+    } else if (event.platform === 'youtube_account') {
       if (event.months > 1) {
         return $t('has been a member for %{months} months', { months: event.months });
       }
       return $t('has become a member');
+    } else if (event.platform === 'kick_account') {
+      if (event.months > 1) {
+        return $t('has resubscribed for %{months} months', { months: event.months });
+      }
+      if (event.gifter) {
+        return $t('has gifted a sub to');
+      }
+      return $t('has subscribed');
     }
+
     if (event.gifter) {
       return $t('has gifted a sub (%{tier}) to', {
         tier: subscriptionMap(event.sub_plan),
@@ -352,6 +395,11 @@ class RecentEventsViews extends ViewHandler<IRecentEventsState> {
         months: event.months,
       });
     }
+    if (event.sub_type === 'primepaidupgrade') {
+      return $t('has converted from a Prime Gaming sub to a %{tier} sub', {
+        tier: subscriptionMap(event.sub_plan),
+      });
+    }
     return $t('has subscribed (%{tier})', { tier: subscriptionMap(event.sub_plan) });
   }
 
@@ -359,6 +407,12 @@ class RecentEventsViews extends ViewHandler<IRecentEventsState> {
     return this.state.recentEvents.find(event => {
       return event.uuid === uuid;
     });
+  }
+
+  get spinWheelExists(): boolean {
+    return !!this.widgetsService.views.widgetSources.find(
+      source => source.type === WidgetType.SpinWheel,
+    );
   }
 }
 
@@ -369,9 +423,12 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
   @Inject() private windowsService: WindowsService;
   @Inject() private websocketService: WebsocketService;
 
+  safeModeStatusChanged = new Subject<ESafeModeStatus>();
+
   static initialState: IRecentEventsState = {
     recentEvents: [],
     muted: false,
+    enableChatNotifs: false,
     mediaShareEnabled: false,
     filterConfig: {
       donation: false,
@@ -416,6 +473,7 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     this.fetchMediaShareState();
     this.subscribeToSocketConnection();
     this.fetchSafeModeStatus();
+    this.fetchMuteChatNotifs();
   }
 
   subscribeToSocketConnection() {
@@ -433,12 +491,14 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     this.unsubscribeFromSocketConnection();
   }
 
+  shutdown() {
+    this.unsubscribeFromSocketConnection();
+  }
+
   fetchRecentEvents() {
     const typeString = this.getEventTypesString();
     // eslint-disable-next-line
-    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/recentevents/${
-      this.userService.widgetToken
-    }?types=${typeString}`;
+    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/recentevents/${this.userService.widgetToken}?types=${typeString}`;
     const headers = authorizedHeaders(this.userService.apiToken);
     const request = new Request(url, { headers });
     return jfetch<{ data: Dictionary<IRecentEvent[]> }>(request).catch(() => {
@@ -448,9 +508,7 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
 
   async fetchConfig() {
     // eslint-disable-next-line
-    const url = `https://${
-      this.hostsService.streamlabs
-    }/api/v5/slobs/widget/config?widget=recent_events`;
+    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/widget/config?widget=recent_events`;
     const headers = authorizedHeaders(this.userService.apiToken);
     return jfetch<IRecentEventsConfig>(url, { headers }).catch(() => {
       console.warn('Error fetching recent events config');
@@ -459,9 +517,7 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
 
   fetchMediaShareState() {
     // eslint-disable-next-line
-    const url = `https://${
-      this.hostsService.streamlabs
-    }/api/v5/slobs/widget/config?widget=media-sharing`;
+    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/widget/config?widget=media-sharing`;
     const headers = authorizedHeaders(this.userService.apiToken);
     return jfetch<{ settings: { advanced_settings: { enabled: boolean } } }>(url, {
       headers,
@@ -509,6 +565,7 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
           'raiders',
           'formatted_amount',
           'sub_plan',
+          'sub_type',
           'months',
           'streak_months',
           'gifter',
@@ -521,6 +578,8 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
           'read',
           'hash',
           'uuid',
+          'power_up_name',
+          'power_up_prompt',
         ]);
       });
 
@@ -533,6 +592,8 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     // Get read status for all events
     const readReceipts = await this.fetchReadReceipts(hashValues);
     eventArray.forEach(event => {
+      // TODO: index
+      // @ts-ignore
       event.read = readReceipts[event.hash] ? readReceipts[event.hash] : false;
 
       // Events older than 1 month are treated as read
@@ -632,12 +693,16 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
       'follow',
       'host',
       'bits',
+      'power_up',
       'raid',
       'subscriber',
       'sponsor',
       'superchat',
       'sticker',
       'effect',
+      'kick_follow',
+      'kick_kicks',
+      'kick_subscription',
       'facebook_support',
       'facebook_like',
       'facebook_share',
@@ -651,6 +716,7 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
       'subscription_tier_3',
       'primesub',
       'gifted_sub',
+      'kick_subscription_gifts',
     ]);
 
     const resubFilters = pick(this.state.filterConfig, [
@@ -712,9 +778,13 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
   }
 
   getEventTypesString() {
-    return Object.keys(this.state.filterConfig)
-      .filter((type: string) => this.state.filterConfig[type] === true)
-      .join(',');
+    return (
+      Object.keys(this.state.filterConfig)
+        // TODO: index
+        // @ts-ignore
+        .filter((type: string) => this.state.filterConfig[type] === true)
+        .join(',')
+    );
   }
 
   applyConfig(config: IRecentEventsConfig) {
@@ -832,16 +902,28 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
       }
       return this.shouldFilterSubscription(event);
     }
+    // TODO: index
+    // @ts-ignore
     return this.transformFilterForPlatform()[event.type];
   }
 
   transformFilterForPlatform() {
     const filterMap = cloneDeep(this.state.filterConfig);
+    // TODO: index
+    // @ts-ignore
     filterMap['support'] = filterMap['facebook_support'];
+    // TODO: index
+    // @ts-ignore
     filterMap['like'] = filterMap['facebook_like'];
+    // TODO: index
+    // @ts-ignore
     filterMap['share'] = filterMap['facebook_share'];
+    // TODO: index
+    // @ts-ignore
     filterMap['stars'] = filterMap['facebook_stars'];
     if (this.userService.platform.type === 'youtube') {
+      // TODO: index
+      // @ts-ignore
       filterMap['subscription'] = filterMap['membership_level_1'];
       filterMap['follow'] = filterMap['subscriber'];
     }
@@ -850,10 +932,10 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
 
   onEventSocket(e: IEventSocketEvent) {
     const messages = e.message
-      .filter(msg => !msg.isTest && !msg.repeat)
+      .filter(msg => !msg.isTest && !msg.isPreview && !msg.repeat)
       .map(msg => {
         msg.platform = e.for;
-        msg.type = e.type;
+        msg.type = getRecentEventType(e);
         msg.hash = getHashForRecentEvent(msg);
         msg.uuid = uuid();
         msg.read = false;
@@ -871,15 +953,43 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     this.ADD_RECENT_EVENT(messages);
   }
 
+  async toggleMuteChatNotifs() {
+    const val = !this.state.enableChatNotifs;
+    const headers = authorizedHeaders(
+      this.userService.apiToken,
+      new Headers({ 'Content-Type': 'application/json' }),
+    );
+    const url = `https://${this.hostsService.streamlabs}/api/v5/widgets/desktop/chat-box/notifications`;
+    const body = JSON.stringify({ enable: val });
+    try {
+      await jfetch(new Request(url, { headers, body, method: 'POST' }));
+      this.SET_MUTE_CHAT_NOTIFS(val);
+    } catch (e: unknown) {
+      return;
+    }
+  }
+
+  async fetchMuteChatNotifs() {
+    const headers = authorizedHeaders(
+      this.userService.apiToken,
+      new Headers({ 'Content-Type': 'application/json' }),
+    );
+    const url = `https://${this.hostsService.streamlabs}/api/v5/widgets/desktop/chat-box`;
+    try {
+      const resp = await jfetch<any>(new Request(url, { headers, method: 'GET' }));
+      if (!resp?.data?.settings) return;
+      this.SET_MUTE_CHAT_NOTIFS(resp.settings.global?.alert_enabled);
+    } catch (e: unknown) {
+      return;
+    }
+  }
+
   async toggleMuteEvents() {
     const headers = authorizedHeaders(
       this.userService.apiToken,
       new Headers({ 'Content-Type': 'application/json' }),
     );
-    // eslint-disable-next-line
-    const url = `https://${
-      this.hostsService.streamlabs
-    }/api/v5/slobs/widget/recentevents/eventspanel`;
+    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/widget/recentevents/eventspanel`;
     const body = JSON.stringify({ muted: !this.state.muted });
     return await fetch(new Request(url, { headers, body, method: 'POST' })).then(handleResponse);
   }
@@ -914,6 +1024,14 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     });
   }
 
+  async spinWheel() {
+    const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/widget/wheel/spin/${this.userService.widgetToken}`;
+    const headers = authorizedHeaders(this.userService.apiToken);
+    const request = new Request(url, { headers, method: 'POST' });
+    const response = await fetch(request);
+    return handleResponse(response);
+  }
+
   showSafeModeWindow() {
     this.windowsService.showWindow({
       componentName: 'SafeMode',
@@ -926,22 +1044,27 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     });
   }
 
-  fetchSafeModeStatus() {
+  async fetchSafeModeStatus() {
     const url = `https://${this.hostsService.streamlabs}/api/v5/slobs/safemode`;
     const headers = authorizedHeaders(this.userService.apiToken);
     return jfetch<{
       safe_mode_settings: { active: boolean; data: ISafeModeServerSettings; ends_at: number };
     }>(url, {
       headers,
-    }).then(data => {
-      this.updateSafeModeSettingsFromServer(data.safe_mode_settings.data);
+    })
+      .then(data => {
+        this.updateSafeModeSettingsFromServer(data.safe_mode_settings.data);
 
-      if (data.safe_mode_settings.active) {
-        this.onSafeModeEnabled(data.safe_mode_settings.ends_at);
-      } else {
+        if (data.safe_mode_settings.active) {
+          this.onSafeModeEnabled(data.safe_mode_settings.ends_at);
+        } else {
+          this.onSafeModeDisabled();
+        }
+      })
+      .catch(error => {
+        console.warn('Error fetching safe mode settings', error);
         this.onSafeModeDisabled();
-      }
-    });
+      });
   }
 
   updateSafeModeSettingsFromServer(data: ISafeModeServerSettings) {
@@ -995,6 +1118,11 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     this.SET_SAFE_MODE_SETTINGS({ loading: true });
     const promise = jfetch(new Request(url, { headers, body, method: 'POST' }));
 
+    promise.then(resp => {
+      this.safeModeStatusChanged.next(ESafeModeStatus.Enabled);
+      return resp;
+    });
+
     promise.finally(() => this.SET_SAFE_MODE_SETTINGS({ loading: false }));
 
     return promise;
@@ -1008,6 +1136,10 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     this.SET_SAFE_MODE_SETTINGS({ loading: true });
     const promise = jfetch(new Request(url, { headers, method: 'DELETE' }));
 
+    promise.then(resp => {
+      this.safeModeStatusChanged.next(ESafeModeStatus.Disabled);
+    });
+
     promise.finally(() => this.SET_SAFE_MODE_SETTINGS({ loading: false }));
 
     return promise;
@@ -1019,10 +1151,17 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
     if (this.state.safeMode.clearRecentEvents) {
       this.SET_RECENT_EVENTS([]);
     }
+
+    this.safeModeStatusChanged.next(ESafeModeStatus.Enabled);
   }
 
   onSafeModeDisabled() {
     this.SET_SAFE_MODE_SETTINGS({ enabled: false });
+    this.safeModeStatusChanged.next(ESafeModeStatus.Disabled);
+  }
+
+  setMuteChatNotifs(val: boolean) {
+    this.SET_MUTE_CHAT_NOTIFS(val);
   }
 
   @mutation()
@@ -1061,6 +1200,8 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
 
   @mutation()
   private SET_SINGLE_FILTER_CONFIG(key: string, value: boolean | number) {
+    // TODO: index
+    // @ts-ignore
     this.state.filterConfig[key] = value;
   }
 
@@ -1072,5 +1213,10 @@ export class RecentEventsService extends StatefulService<IRecentEventsState> {
   @mutation()
   private SET_SAFE_MODE_SETTINGS(patch: Partial<ISafeModeSettings>) {
     this.state.safeMode = { ...this.state.safeMode, ...patch };
+  }
+
+  @mutation()
+  private SET_MUTE_CHAT_NOTIFS(val: boolean) {
+    this.state.enableChatNotifs = val;
   }
 }

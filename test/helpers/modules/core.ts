@@ -2,11 +2,14 @@
  * The core module provides methods for the most frequent actions
  */
 
-import { getContext, TExecutionContext } from '../spectron';
+import { getContext } from '../webdriver/index';
+import { getApiClient } from '../api-client';
+import { WindowsService } from '../../../app/services/windows';
+import type { ClickOptions, WaitForOptions } from 'webdriverio';
 
 export type TSelectorOrEl = string | WebdriverIO.Element;
 
-export function getClient() {
+export function getClient(): WebdriverIO.Browser {
   return getContext().context.app.client;
 }
 
@@ -22,13 +25,20 @@ export async function select(selectorOrEl: TSelectorOrEl): Promise<WebdriverIO.E
   return selectorOrEl;
 }
 
+/**
+ * A shortcut for client.$$()
+ */
+export async function selectElements(selector: string): Promise<WebdriverIO.ElementArray> {
+  return getClient().$$(selector);
+}
+
 export function selectButton(buttonText: string) {
   return select(`button=${buttonText}`);
 }
 
 // CLICK SHORTCUTS
 
-export async function click(selectorOrEl: TSelectorOrEl, options?: WebdriverIO.ClickOptions) {
+export async function click(selectorOrEl: TSelectorOrEl, options?: ClickOptions) {
   const $el = await select(selectorOrEl);
   await $el.waitForClickable();
   await $el.click(options);
@@ -40,6 +50,11 @@ export async function clickIfDisplayed(selectorOrEl: TSelectorOrEl) {
   }
 }
 
+export async function clickWhenDisplayed(selectorOrEl: TSelectorOrEl, options?: WaitForOptions) {
+  await waitForDisplayed(selectorOrEl, options);
+  await click(selectorOrEl);
+}
+
 export async function clickText(text: string) {
   await (await select(`*=${text}`)).click();
 }
@@ -49,38 +64,101 @@ export async function clickButton(buttonText: string) {
   await click($button);
 }
 
-export async function clickTab(tabText: string) {
-  await click(`div[role="tab"]=${tabText}`);
+export async function clickTab(tabText: string, dataName?: string) {
+  const selector = dataName ? `[data-name="${dataName}"]` : `div[role="tab"]=${tabText}`;
+  await click(selector);
+}
+
+/**
+ * Check whether a tab with the given text is currently active
+ * @remark Note: to throw an error if the tab is not active, must be used with `t.true`
+ * @param tabText The text of the tab to check
+ * @param dataName Optional data-name attribute of the tab to check, use if the tab text is not unique
+ * or if the tab contents contain elements other than text
+ * @returns A promise that resolves to true if the tab is active, false otherwise
+ */
+export async function isTabActive(tabText: string, dataName?: string): Promise<boolean> {
+  // Test for active tab with data-name as selector
+  if (dataName) {
+    const $span = await select(`[data-name="${dataName}"]`);
+    const $tabBtn = await $span.parentElement();
+    const ariaSelected = await $tabBtn.getAttribute('aria-selected');
+    return ariaSelected === 'true';
+  }
+
+  // Test for active tab with text as selector
+  const $tab = await select(`div[role="tab"]=${tabText}`);
+  const ariaSelected = await $tab.getAttribute('aria-selected');
+  return ariaSelected === 'true';
+}
+
+export async function clickCheckbox(dataName: string) {
+  const $checkbox = await select(`input[data-name="${dataName}"]`);
+  await $checkbox.click();
+}
+
+export async function clickToggle(dataName: string) {
+  const $toggle = await select(`button[data-name="${dataName}"]`);
+  await $toggle.click();
+}
+
+export async function selectAsyncAlert(title: string) {
+  await (await getClient().$('span.ant-modal-confirm-title')).waitForExist();
+  const alert = await select('span.ant-modal-confirm-title');
+  if ((await alert.getText()) === title) {
+    return alert;
+  }
 }
 
 // OTHER SHORTCUTS
 
-export async function isDisplayed(
-  selectorOrEl: TSelectorOrEl,
-  waitForOptions?: WebdriverIO.WaitForOptions,
-) {
+export async function hoverElement(selector: string, waitForOptions?: WaitForOptions) {
+  const element = await select(`${selector}`);
+  await element.moveTo();
+  if (waitForOptions?.timeout) {
+    await getClient().pause(waitForOptions.timeout);
+  }
+}
+
+/**
+ * Hover an element and confirm the expected tooltip mounted
+ * @remark Tooltip visibility cannot be asserted in tests.
+ * `useWebdriver` injects `.ant-tooltip-content{display:none}` on app start because on a user's
+ * first app start, there are dismissible tooltips to guide them. This means test clicks could
+ * be swallowed by tooltips.
+ * Unfortunately, the side effect of this implementation is that asserting on tooltip visibility
+ * with `isDisplayed() === false` will fail no matter what the app renders. Antd still mounts the
+ * overlay on hover, so assert on existence instead.
+ * @param hoverSelector - The element to hover to open the tooltip
+ * @param tooltipSelector - The expected tooltip contents
+ * @returns Whether the tooltip is in the DOM
+ */
+export async function tooltipExists(
+  hoverSelector: string,
+  tooltipSelector: string,
+  waitForOptions?: WaitForOptions,
+): Promise<boolean> {
+  await hoverElement(hoverSelector, waitForOptions);
+  return (await select(tooltipSelector)).isExisting();
+}
+
+export async function isDisplayed(selectorOrEl: TSelectorOrEl, waitForOptions?: WaitForOptions) {
   if (waitForOptions) {
     try {
       await waitForDisplayed(selectorOrEl, waitForOptions);
       return true;
-    } catch (e) {
+    } catch (e: unknown) {
       return false;
     }
   }
   return await (await select(selectorOrEl)).isDisplayed();
 }
 
-export async function waitForDisplayed(
-  selectorOrEl: TSelectorOrEl,
-  options?: WebdriverIO.WaitForOptions,
-) {
+export async function waitForDisplayed(selectorOrEl: TSelectorOrEl, options?: WaitForOptions) {
   await (await select(selectorOrEl)).waitForDisplayed(options);
 }
 
-export async function waitForClickable(
-  selectorOrEl: TSelectorOrEl,
-  options?: WebdriverIO.WaitForOptions,
-) {
+export async function waitForClickable(selectorOrEl: TSelectorOrEl, options?: WaitForOptions) {
   await (await select(selectorOrEl)).waitForClickable(options);
 }
 
@@ -88,11 +166,50 @@ export function waitForText(text: string) {
   return waitForDisplayed(`*="${text}"`);
 }
 
-export async function waitForEnabled(
-  selectorOrEl: TSelectorOrEl,
-  options?: WebdriverIO.WaitForOptions,
-) {
+export async function waitForEnabled(selectorOrEl: TSelectorOrEl, options?: WaitForOptions) {
   await (await select(selectorOrEl)).waitForEnabled(options);
+}
+
+/**
+ * Wait for an antd message alert identified by its data-name attribute
+ */
+export async function waitForAlert(name: string, options?: WaitForOptions) {
+  await waitForDisplayed(`[data-name="${name}"]`, options);
+}
+
+/**
+ * Click an antd message alert identified by its data-name attribute, if displayed
+ */
+export async function clickAlert(name: string) {
+  const selector = `[data-name="${name}"]`;
+  if (await isDisplayed(selector)) {
+    await click(selector);
+  }
+}
+
+/**
+ * Wait for an antd message alert by data-name, then click it to dismiss
+ */
+export async function dismissAlert(name: string, options?: WaitForOptions) {
+  await waitForAlert(name, options);
+  await clickAlert(name);
+}
+
+/**
+ * Get number of elements displayed
+ * @remark This is needed because arrays of WebdriverIO.Element cannot use array methods and properties
+ */
+export async function getNumElements(selector: string): Promise<number> {
+  const elements = (await selectElements(selector)).values();
+  let numElements = 0;
+
+  if (elements) {
+    for await (const element of elements) {
+      numElements++;
+    }
+  }
+
+  return numElements;
 }
 
 // WINDOW FOCUS
@@ -104,9 +221,9 @@ export async function getFocusedWindowId(): Promise<string> {
 
 export async function focusWindow(winIdOrRegexp: string | RegExp): Promise<boolean> {
   const client = await getClient();
-  const count = await getClient().getWindowCount();
-  for (let i = 0; i < count; i++) {
-    await client.windowByIndex(i);
+  const handles = await client.getWindowHandles();
+  for (let ind = 0; ind < handles.length; ind++) {
+    await client.switchToWindow(handles[ind]);
     const url = await client.getUrl();
     if (typeof winIdOrRegexp === 'string') {
       const winId = winIdOrRegexp;
@@ -128,9 +245,19 @@ export async function focusMain() {
 }
 
 export async function closeWindow(winId: string) {
-  await useWindow(winId, async () => {
-    await getContext().context.app.browserWindow.close();
-  });
+  const api = await getApiClient();
+  const windowsService = api.getResource<WindowsService>('WindowsService');
+  switch (winId) {
+    case 'main':
+      await windowsService.closeMainWindow();
+      break;
+    case 'child':
+      await windowsService.closeChildWindow();
+      break;
+    default:
+      await windowsService.closeOneOffWindow(winId);
+      break;
+  }
 }
 
 /**
@@ -158,9 +285,11 @@ export async function useChildWindow<TCallbackResult>(cb: () => Promise<TCallbac
 }
 
 export async function waitForLoader() {
-  await (await select('.main-loading')).waitForExist({
+  await (await select('[data-name="main-loading"]')).waitForExist({
     interval: 100, // we need a smaller interval to run tests faster
-    timeout: 20000,
+    timeout: 30000,
     reverse: true,
   });
+  // Wait for titlebar to show up since there is some lag in loading react components into vue
+  await (await select('[data-name="title-bar"]')).waitForExist({ timeout: 10000 });
 }

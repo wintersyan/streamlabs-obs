@@ -1,5 +1,5 @@
 import Vue from 'vue';
-import electron from 'electron';
+import * as remote from '@electron/remote';
 import { Component, Watch } from 'vue-property-decorator';
 import { Inject } from 'services/core/injector';
 import { getComponents, IModalOptions, IWindowOptions, WindowsService } from 'services/windows';
@@ -8,7 +8,7 @@ import { TitleBar } from 'components/shared/ReactComponentList';
 import { AppService } from 'services/app';
 import styles from './ChildWindow.m.less';
 import ModalWrapper from '../shared/modals/ModalWrapper';
-import antdThemes from 'styles/antd/index';
+import antdThemes, { Theme } from 'styles/antd/index';
 
 @Component({})
 export default class ChildWindow extends Vue {
@@ -19,8 +19,17 @@ export default class ChildWindow extends Vue {
   components: IWindowOptions[] = [];
   private refreshingTimeout: number;
   private modalOptions: IModalOptions = { renderFn: null };
+  private isGoLiveActive = false;
+
+  unbind: () => void;
+
+  theme: Theme = 'night-theme';
 
   mounted() {
+    this.unbind = this.customizationService.state.bindProps(this, {
+      theme: 'theme',
+    });
+
     antdThemes[this.theme].use();
     WindowsService.modalChanged.subscribe(modalOptions => {
       this.modalOptions = { ...this.modalOptions, ...modalOptions };
@@ -32,12 +41,12 @@ export default class ChildWindow extends Vue {
     });
   }
 
-  get options() {
-    return this.windowsService.state.child;
+  destroyed() {
+    this.unbind();
   }
 
-  get theme() {
-    return this.customizationService.currentTheme;
+  get options() {
+    return this.windowsService.state.child;
   }
 
   get currentComponent() {
@@ -53,7 +62,15 @@ export default class ChildWindow extends Vue {
   }
 
   @Watch('theme')
-  updateAntd(newTheme: string, oldTheme: string) {
+  updateAntd(newTheme: Theme, oldTheme: Theme) {
+    if (this.isGoLiveActive && this.activeGoLiveTheme) {
+      // Swap to the Go Live variant matching the new app theme
+      const newGoLiveTheme = ChildWindow.goLiveThemeMap[newTheme] ?? 'golive-night-theme';
+      antdThemes[this.activeGoLiveTheme].unuse();
+      antdThemes[newGoLiveTheme].use();
+      this.activeGoLiveTheme = newGoLiveTheme;
+      return;
+    }
     antdThemes[oldTheme].unuse();
     antdThemes[newTheme].use();
   }
@@ -63,7 +80,7 @@ export default class ChildWindow extends Vue {
   }
 
   private setWindowTitle() {
-    electron.remote.getCurrentWindow().setTitle(this.currentComponent.title);
+    remote.getCurrentWindow().setTitle(this.currentComponent.title);
   }
 
   windowResizeTimeout: number;
@@ -84,10 +101,13 @@ export default class ChildWindow extends Vue {
     window.removeEventListener('resize', this.windowSizeHandler);
     // If the window was closed, just clear the stack
     if (!options.isShown) {
+      this.restoreAppTheme();
       this.clearComponentStack();
       WindowsService.hideModal();
       return;
     }
+
+    this.applyGoLiveThemeIfNeeded(options.componentName);
 
     if (options.preservePrevWindow) {
       this.handlePreservePrevWindow(options);
@@ -132,6 +152,36 @@ export default class ChildWindow extends Vue {
     window.addEventListener('resize', this.windowSizeHandler);
   }
 
+  private static readonly goLiveThemeMap: Record<string, Theme> = {
+    'night-theme': 'golive-night-theme',
+    'day-theme': 'golive-day-theme',
+    'prime-dark': 'golive-prime-dark',
+    'prime-light': 'golive-prime-light',
+  };
+
+  private activeGoLiveTheme: Theme | null = null;
+
+  private applyGoLiveThemeIfNeeded(componentName: string | undefined) {
+    const isGoLive = componentName === 'GoLiveWindow' || componentName === 'EditStreamWindow';
+    if (isGoLive && !this.isGoLiveActive) {
+      const goLiveTheme = ChildWindow.goLiveThemeMap[this.theme] ?? 'golive-night-theme';
+      antdThemes[this.theme].unuse();
+      antdThemes[goLiveTheme].use();
+      this.activeGoLiveTheme = goLiveTheme;
+      this.isGoLiveActive = true;
+    } else if (!isGoLive && this.isGoLiveActive) {
+      this.restoreAppTheme();
+    }
+  }
+
+  private restoreAppTheme() {
+    if (!this.isGoLiveActive || !this.activeGoLiveTheme) return;
+    antdThemes[this.activeGoLiveTheme].unuse();
+    antdThemes[this.theme].use();
+    this.activeGoLiveTheme = null;
+    this.isGoLiveActive = false;
+  }
+
   render() {
     return (
       <div style="height: 100%;" class={this.theme} id="mainWrapper">
@@ -144,6 +194,8 @@ export default class ChildWindow extends Vue {
         <ModalWrapper renderFn={this.modalOptions?.renderFn} />
 
         {this.componentsToRender.map((comp, index) => {
+          // TODO: index
+          // @ts-ignore
           const ChildWindowComponent = getComponents()[comp.componentName];
           return (
             <ChildWindowComponent key={`${comp.componentName}-${index}`} vShow={comp.isShown} />
